@@ -1,0 +1,3 @@
+/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/RelWithDebInfo/2c4q2e6u/x86_64/CMakeFiles/I2cNative.dir
+/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/RelWithDebInfo/2c4q2e6u/x86_64/CMakeFiles/edit_cache.dir
+/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/RelWithDebInfo/2c4q2e6u/x86_64/CMakeFiles/rebuild_cache.dir

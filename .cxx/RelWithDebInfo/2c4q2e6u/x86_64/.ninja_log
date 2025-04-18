@@ -1,0 +1,3 @@
+# ninja log v5
+0	30	1744962771323533001	CMakeFiles/I2cNative.dir/I2cNative.c.o	9f79e1dcad063a4
+30	65	1744962771357318986	/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/cxx/RelWithDebInfo/2c4q2e6u/obj/x86_64/libI2cNative.so	fb4bbbc74e20aaa

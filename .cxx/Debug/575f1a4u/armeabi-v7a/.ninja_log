@@ -1,0 +1,3 @@
+# ninja log v5
+0	28	1744962743796982319	CMakeFiles/I2cNative.dir/I2cNative.c.o	b46b3ca110199a6c
+29	60	1744962743828475677	/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/cxx/Debug/575f1a4u/obj/armeabi-v7a/libI2cNative.so	2d74e6daf2a14db

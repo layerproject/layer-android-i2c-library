@@ -1,0 +1,4 @@
+/Users/gilles/Library/Android/sdk/cmake/3.22.1/bin/ninja \
+  -C \
+  /Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/Debug/575f1a4u/armeabi-v7a \
+  I2cNative

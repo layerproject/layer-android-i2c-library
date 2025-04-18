@@ -1,0 +1,6 @@
+$dokka.format:javadoc-v1
+$dokka.linkExtension:html
+$dokka.location:com.layer.i2c/SensorDemo.Companion///PointingToDeclaration/com/layer/i2c/SensorDemo.Companion.html
+$dokka.location:com.layer.i2c/SensorManager.Companion///PointingToDeclaration/com/layer/i2c/SensorManager.Companion.html
+com.layer.i2c
+

@@ -1,0 +1,3 @@
+ninja: Entering directory `/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/Debug/575f1a4u/arm64-v8a'
+[1/2] Building C object CMakeFiles/I2cNative.dir/I2cNative.c.o
+[2/2] Linking C shared library /Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/cxx/Debug/575f1a4u/obj/arm64-v8a/libI2cNative.so

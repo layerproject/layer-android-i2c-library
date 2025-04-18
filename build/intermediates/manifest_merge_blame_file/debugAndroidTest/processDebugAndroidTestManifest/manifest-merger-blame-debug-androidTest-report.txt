@@ -1,0 +1,100 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.layer.i2c.test" >
+4
+5    <uses-sdk
+5-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:5:5-74
+6        android:minSdkVersion="26"
+6-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:5:15-41
+7        android:targetSdkVersion="26" />
+7-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:5:42-71
+8
+9    <instrumentation
+9-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:11:5-15:68
+10        android:name="androidx.test.runner.AndroidJUnitRunner"
+10-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:11:22-76
+11        android:functionalTest="false"
+11-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:14:22-52
+12        android:handleProfiling="false"
+12-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:13:22-53
+13        android:label="Tests for com.layer.i2c.test"
+13-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:15:22-66
+14        android:targetPackage="com.layer.i2c.test" />
+14-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:12:22-64
+15
+16    <uses-permission android:name="android.permission.REORDER_TASKS" />
+16-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:24:5-72
+16-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:24:22-69
+17
+18    <permission
+18-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
+19        android:name="com.layer.i2c.test.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+19-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:23:9-81
+20        android:protectionLevel="signature" />
+20-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:24:9-44
+21
+22    <uses-permission android:name="com.layer.i2c.test.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+22-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:26:5-97
+22-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:26:22-94
+23
+24    <application
+24-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:7:5-9:19
+25        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+25-->[androidx.core:core:1.12.0] /Users/gilles/.gradle/caches/transforms-3/f466691212188314bfe8fbba1e7b1036/transformed/core-1.12.0/AndroidManifest.xml:28:18-86
+26        android:debuggable="true"
+27        android:extractNativeLibs="false" >
+28        <uses-library android:name="android.test.runner" />
+28-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:8:9-60
+28-->/Users/gilles/Documents/layerproject/layer-android-i2c-library/build/intermediates/tmp/manifest/androidTest/debug/tempFile1ProcessTestManifest7847915700968100618.xml:8:23-57
+29
+30        <activity
+30-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:27:9-34:20
+31            android:name="androidx.test.core.app.InstrumentationActivityInvoker$BootstrapActivity"
+31-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:28:13-99
+32            android:exported="true"
+32-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:29:13-36
+33            android:theme="@style/WhiteBackgroundTheme" >
+33-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:30:13-56
+34            <intent-filter android:priority="-100" >
+34-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:13-33:29
+34-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:28-51
+35                <category android:name="android.intent.category.LAUNCHER" />
+35-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:17-77
+35-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:27-74
+36            </intent-filter>
+37        </activity>
+38        <activity
+38-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:35:9-42:20
+39            android:name="androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity"
+39-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:36:13-95
+40            android:exported="true"
+40-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:37:13-36
+41            android:theme="@style/WhiteBackgroundTheme" >
+41-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:38:13-56
+42            <intent-filter android:priority="-100" >
+42-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:13-33:29
+42-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:28-51
+43                <category android:name="android.intent.category.LAUNCHER" />
+43-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:17-77
+43-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:27-74
+44            </intent-filter>
+45        </activity>
+46        <activity
+46-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:43:9-50:20
+47            android:name="androidx.test.core.app.InstrumentationActivityInvoker$EmptyFloatingActivity"
+47-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:44:13-103
+48            android:exported="true"
+48-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:45:13-36
+49            android:theme="@style/WhiteBackgroundDialogTheme" >
+49-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:46:13-62
+50            <intent-filter android:priority="-100" >
+50-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:13-33:29
+50-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:31:28-51
+51                <category android:name="android.intent.category.LAUNCHER" />
+51-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:17-77
+51-->[androidx.test:core:1.5.0] /Users/gilles/.gradle/caches/transforms-3/c1197505f8f9d49c6e2bbbe8a64864e3/transformed/core-1.5.0/AndroidManifest.xml:32:27-74
+52            </intent-filter>
+53        </activity>
+54    </application>
+55
+56</manifest>

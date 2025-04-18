@@ -1,0 +1,2 @@
+ninja: Entering directory `/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/RelWithDebInfo/2c4q2e6u/x86'
+ninja: no work to do.
