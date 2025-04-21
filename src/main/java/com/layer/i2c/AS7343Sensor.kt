@@ -7,16 +7,13 @@ import java.io.IOException
  * High-level interface for the AS7343 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7343Sensor(private val busPath: String) {
+class AS7343Sensor(private val busPath: String) : SpectralSensor {
     companion object {
         private const val TAG = "AS7343Sensor"
         // AS7343 sensor address - Confirmed 0x39
         private const val AS7343_ADDRESS = 0x39
 
         // --- AS7343 Register Addresses (Verified from Datasheet) ---
-        private const val AS7343_AUXID = 0x58
-        private const val AS7343_REVID = 0x59
-        private const val AS7343_ID = 0x5A
 
         // Configuration Registers (Bank 0 unless noted)
         private const val AS7343_ENABLE_REG = 0x80      // Enable Register
@@ -78,7 +75,7 @@ class AS7343Sensor(private val busPath: String) {
      * Opens a connection to the sensor and initializes it.
      * @return true if connection and initialization were successful, false otherwise
      */
-    fun connect(): Boolean {
+    override fun connect(): Boolean {
         if (isInitialized) {
             Log.d(TAG, "Sensor on $busPath already connected and initialized.")
             return true
@@ -110,8 +107,6 @@ class AS7343Sensor(private val busPath: String) {
             return false
         }
 
-        readIDs()
-
         Log.i(TAG, "Sensor on $busPath connected and initialized successfully.")
         return true
     }
@@ -119,7 +114,7 @@ class AS7343Sensor(private val busPath: String) {
     /**
      * Closes the connection to the sensor and attempts to power it down.
      */
-    fun disconnect() {
+    override fun disconnect() {
         if (fileDescriptor >= 0) {
             Log.d(TAG, "Disconnecting sensor on $busPath (fd=$fileDescriptor)...")
             // Attempt to power down before closing
@@ -138,21 +133,6 @@ class AS7343Sensor(private val busPath: String) {
         } else {
             Log.d(TAG, "Sensor on $busPath already disconnected.")
         }
-    }
-
-    fun readIDs(): Map<String, String> {
-        if (!connect()) {
-
-        } else {
-            val auxid = readByteReg(fileDescriptor, AS7343_AUXID)
-            Log.d(TAG, "Reading sensor AUXID: $auxid")
-            val revid = readByteReg(fileDescriptor, AS7343_ID)
-            Log.d(TAG, "Reading sensor REVID: $revid")
-            val id = readByteReg(fileDescriptor, AS7343_ID)
-            Log.d(TAG, "Reading sensor ID: $id")
-        }
-
-        return emptyMap()
     }
 
     /**
@@ -183,7 +163,7 @@ class AS7343Sensor(private val busPath: String) {
      * Call connect() before using this, and disconnect() when done.
      * @return Map of primary channel names to values, or empty map if not initialized or read fails.
      */
-    fun readSpectralData(): Map<String, Int> {
+    override fun readSpectralData(): Map<String, Int> {
         if (!isInitialized) {
             Log.e(TAG, "Sensor not initialized. Call connect() first.")
             return emptyMap()
@@ -239,7 +219,7 @@ class AS7343Sensor(private val busPath: String) {
      * Checks if the sensor is connected *and* initialized.
      * @return true if connected and initialized, false otherwise
      */
-    fun isReady(): Boolean {
+    override fun isReady(): Boolean {
         return isInitialized && fileDescriptor >= 0
     }
 
@@ -248,7 +228,7 @@ class AS7343Sensor(private val busPath: String) {
      * Useful for direct access via the SensorManager if needed, but check isReady() first.
      * @return I2C file descriptor, or -1 if not connected/initialized
      */
-    fun getFileDescriptor(): Int {
+    override fun getFileDescriptor(): Int {
         return if (isReady()) fileDescriptor else -1
     }
 
@@ -272,7 +252,7 @@ class AS7343Sensor(private val busPath: String) {
     /**
      * Opens an I2C connection to an AS7343 sensor on the specified bus.
      */
-    fun openSensor(busPath: String): Int {
+    private fun openSensor(busPath: String): Int {
         val fd = I2cNative.openBus(busPath, AS7343_ADDRESS)
         if (fd < 0) {
             Log.e(TAG, "Failed to open I2C bus $busPath for address $AS7343_ADDRESS")

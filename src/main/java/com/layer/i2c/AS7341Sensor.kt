@@ -7,12 +7,13 @@ import java.io.IOException
  * High-level interface for the AS7341 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7341Sensor(private val busPath: String) {
+class AS7341Sensor(private val busPath: String) : SpectralSensor {
     companion object {
         private const val TAG = "AS7341Sensor"
 
         // AS7341 sensor address - typically this is fixed at 0x39
         private const val AS7341_ADDRESS = 0x39
+        private const val AS7341_ID = 0x92
 
         // AS7341 registers
         private const val REG_ENABLE = 0x80
@@ -20,6 +21,7 @@ class AS7341Sensor(private val busPath: String) {
         private const val REG_CONFIG0 = 0xa9
         private const val REG_LED_CONFIG = 0x74
         private const val REG_CONFIG = 0x70
+        private const val REG_CFG1 = 0xaa
         private const val REG_CFG6 = 0xaf
 
         // Register data start addresses
@@ -43,7 +45,7 @@ class AS7341Sensor(private val busPath: String) {
      * Opens a connection to the sensor.
      * @return true if connection was successful, false otherwise
      */
-    fun connect(): Boolean {
+    override fun connect(): Boolean {
         Log.d(TAG, "Connecting sensor")
         if (isConnected) {
             return true
@@ -51,13 +53,21 @@ class AS7341Sensor(private val busPath: String) {
         
         fileDescriptor = openSensor(busPath)
         isConnected = fileDescriptor >= 0
+
+        if (isConnected) {
+            setGain(fileDescriptor, 9)
+        }
         return isConnected
+    }
+
+    fun isCorrectSensor(): Boolean {
+        return (readID() == 36)
     }
     
     /**
      * Closes the connection to the sensor.
      */
-    fun disconnect() {
+    override fun disconnect() {
         if (isConnected) {
             closeSensor(fileDescriptor)
             fileDescriptor = -1
@@ -69,7 +79,7 @@ class AS7341Sensor(private val busPath: String) {
      * Reads all spectral channels from the sensor.
      * @return Map of channel names to values, or empty map if not connected
      */
-    fun readSpectralData(): Map<String, Int> {
+    override fun readSpectralData(): Map<String, Int> {
         return if (isConnected) {
             val data = readAllChannels(fileDescriptor)
             Log.d(TAG, "Sensor read spectral data: $data")
@@ -100,7 +110,7 @@ class AS7341Sensor(private val busPath: String) {
      * Checks if the sensor is connected.
      * @return true if connected, false otherwise
      */
-    fun isConnected(): Boolean {
+    override fun isReady(): Boolean {
         return isConnected
     }
     
@@ -109,7 +119,7 @@ class AS7341Sensor(private val busPath: String) {
      * Useful for direct access via the SensorManager if needed.
      * @return I2C file descriptor, or -1 if not connected
      */
-    fun getFileDescriptor(): Int {
+    override fun getFileDescriptor(): Int {
         return fileDescriptor
     }
 
@@ -415,5 +425,42 @@ class AS7341Sensor(private val busPath: String) {
      */
     private fun enableSpectralMeasurement(fd: Int, enableMeasurement: Boolean) {
         enable(fd, BIT_MEASUREMENT, enableMeasurement)
+    }
+
+    private fun setGain(fd: Int, againValue: Int) {
+        if (fd < 0) return
+        val safeAgain = againValue.coerceIn(0, 12)
+        try {
+            Log.d(TAG, "Setting Gain (AGAIN) on fd=$fd to $safeAgain")
+            setBank(fd, false) // Ensure Bank 0
+            setRegisterBits(fd, REG_CFG1, 0, 5, safeAgain)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting gain for fd=$fd: ${e.message}", e)
+        }
+    }
+
+    private fun setRegisterBits(fd: Int, register: Int, shift: Int, width: Int, value: Int) {
+        var regValue = readByteReg(fd, register)
+        val mask = ((1 shl width) - 1) shl shift
+        regValue = (regValue and mask.inv()) or ((value shl shift) and mask)
+        writeByteReg(fd, register, regValue)
+    }
+
+    private fun writeByteReg(fd: Int, register: Int, value: Int) {
+        val result = I2cNative.writeByte(fd, register, value)
+        if (result < 0) {
+            throw IOException("I2C Write Error on fd=$fd, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result")
+        }
+    }
+
+    fun readID(): Int {
+        if (!isConnected) {
+            return -1
+        }
+
+        val id = readByteReg(fileDescriptor, AS7341_ID)
+        Log.d(TAG, "Reading sensor ID: $id")
+
+        return id
     }
 }
