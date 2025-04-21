@@ -47,6 +47,15 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_writeWord
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readWord
         (JNIEnv *, jclass, jint, jint);
 
+
+/*
+ * Class:     com_layer_i2c_I2cNative
+ * Method:    readByte
+ * Signature: (II)I
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readByte
+        (JNIEnv *, jclass, jint, jint);
+
 /*
  * Class:     com_layer_i2c_I2cNative
  * Method:    readAllBytes

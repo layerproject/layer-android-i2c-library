@@ -528,13 +528,29 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
         writeByteReg(fd, register, regValue)
     }
 
+    // private fun readByteReg(fd: Int, register: Int): Int {
+    //     // Assuming I2cNative.readWord handles setting the register address implicitly
+    //     val result = I2cNative.readWord(fd, register)
+    //     if (result < 0) {
+    //         throw IOException("I2C Read Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
+    //     }
+    //     return result and 0xFF
+    // }
+
     private fun readByteReg(fd: Int, register: Int): Int {
-        // Assuming I2cNative.readWord handles setting the register address implicitly
-        val result = I2cNative.readWord(fd, register)
+        // *** Use the new native function for reading a single byte ***
+        val result = I2cNative.readByte(fd, register)
+    
+        // Check for I2C communication errors (negative return value)
         if (result < 0) {
-            throw IOException("I2C Read Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
+            // Log the specific error before throwing
+            Log.e(TAG, "I2C Read Byte Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
+            throw IOException("I2C Read Byte Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
         }
-        return result and 0xFF
+    
+        // 'result' now correctly contains the 8-bit value (0-255) read from the register
+        // No masking is needed here.
+        return result
     }
 
     private fun writeByteReg(fd: Int, register: Int, value: Int) {

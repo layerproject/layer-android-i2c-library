@@ -59,6 +59,20 @@ static inline __s32 i2c_smbus_write_word_data(int file, __u8 command, __u16 valu
     return i2c_smbus_access(file, I2C_SMBUS_WRITE, command, I2C_SMBUS_WORD_DATA, &data);
 }
 
+// --- NEW HELPER FUNCTION for Read Byte Data ---
+static inline __s32 i2c_smbus_read_byte_data(int file, __u8 command)
+{
+    union i2c_smbus_data data;
+    // Use I2C_SMBUS_BYTE_DATA for the size parameter
+    if (i2c_smbus_access(file, I2C_SMBUS_READ, command, I2C_SMBUS_BYTE_DATA, &data)) {
+        return -1; // Error
+    } else {
+        // Return the single byte read
+        return 0xFF & data.byte; // Mask to ensure only 8 bits (0-255) are returned
+    }
+}
+// --- End of NEW HELPER FUNCTION ---
+
 //JNI part begins here
 
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_openBus
@@ -117,6 +131,16 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readWord
         return (jint)(0x0FFFF & data.word);
     }
 }
+
+// --- NEW JNI FUNCTION for Read Byte ---
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readByte
+        (JNIEnv *env, jclass jcl, jint fd, jint address)
+{
+    __u8 addr = address & 0xFF;
+    // Call the new helper function
+    return i2c_smbus_read_byte_data(fd, addr);
+}
+// --- End of NEW JNI FUNCTION ---
 
 JNIEXPORT jlong JNICALL Java_com_layer_i2c_I2cNative_readAllBytes
         (JNIEnv *env, jclass jcl, jint fd, jint address)

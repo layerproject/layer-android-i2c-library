@@ -60,6 +60,15 @@ public class I2cNative {
     public static native int readWord(int fd, int address);
 
     /**
+     * Reads one byte from a specified address inside the i2c bus.
+     *
+     * @param fd            file descriptor of i2c bus
+     * @param address       address in the device
+     * @return number from 0 to 255 if reading was successful (1 byte). Negative number if reading failed.
+     */
+    public static native int readByte(int fd, int address);
+
+    /**
      * Reads number of bytes from a specified address inside the i2c bus.
      *
      * @param fd            file descriptor of i2c bus
