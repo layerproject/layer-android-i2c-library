@@ -7,6 +7,10 @@ import android.util.Log
  * Provides convenient methods for sensor operations.
  */
 class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
+    // Implement abstract register properties
+    override val REG_ATIME: Int = 0x81    // Integration Time ADC cycles LSB
+    override val REG_ASTEP_L: Int = 0xD4  // Integration Time Step Size LSB (16-bit)
+    
     companion object {
         private const val TAG = "AS7343Sensor"
 
@@ -14,10 +18,8 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
 
         // Configuration Registers (Bank 0 unless noted)
         private const val AS7343_ENABLE_REG = 0x80      // Enable Register
-        private const val AS7343_ATIME_REG = 0x81       // Integration Time ADC cycles LSB
         private const val AS7343_WTIME_REG = 0x83       // Wait Time cycles
-        private const val AS7343_ASTEP_L_REG = 0xD4     // Integration Time Step Size LSB (16-bit)
-        private const val AS7343_ASTEP_H_REG = 0xD5     // Integration Time Step Size MSB (16-bit)
+
         private const val AS7343_CFG0_REG = 0xBF        // Bank Select, Low Power Idle, WLONG
         private const val AS7343_CFG1_REG = 0xC6        // AGAIN (Spectral Gain)
         private const val AS7343_CFG20_REG = 0xD6       // auto_smux setting, FD FIFO 8b mode
@@ -238,29 +240,6 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     }
 
     // --- Configuration Methods ---
-
-    private fun setIntegrationTime(fd: Int, atime: Int, astep: Int) {
-        if (fd < 0) return
-        val safeAtime = atime.coerceIn(0, 255)
-        val safeAstep = astep.coerceIn(0, 65534)
-        if (safeAtime == 0 && safeAstep == 0) {
-            Log.e(TAG, "ATIME and ASTEP cannot both be 0. Setting ASTEP=1.")
-            _setIntegrationTimeInternal(fd, 0, 1)
-            return
-        }
-        _setIntegrationTimeInternal(fd, safeAtime, safeAstep)
-    }
-
-    private fun _setIntegrationTimeInternal(fd: Int, atime: Int, astep: Int) {
-        try {
-            Log.d(TAG, "Setting ATIME=$atime, ASTEP=$astep on fd=$fd")
-            setBank(fd, false) // Ensure Bank 0
-            writeByteReg(fd, AS7343_ATIME_REG, atime)
-            writeWordReg(fd, AS7343_ASTEP_L_REG, astep)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting integration time for fd=$fd: ${e.message}", e)
-        }
-    }
 
     fun setGain(fd: Int, againValue: Int) {
         if (fd < 0) return

@@ -7,6 +7,10 @@ import android.util.Log
  * Provides convenient methods for sensor operations.
  */
 class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
+    // Implement abstract register properties
+    override val REG_ATIME: Int = 0x81    // Integration Time ADC cycles LSB 
+    override val REG_ASTEP_L: Int = 0xCA  // Integration Time Step Size LSB (16-bit)
+    
     companion object {
         private const val TAG = "AS7341Sensor"
 
@@ -104,9 +108,12 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         togglePower(fd, true)
         Thread.sleep(5) // Short delay after power on
 
-        val gainValue = 9
+        val gainValue = 10
         Log.d(TAG, "Setting gain to $gainValue")
         setGain(fileDescriptor, gainValue)
+
+
+
         return true
     }
 

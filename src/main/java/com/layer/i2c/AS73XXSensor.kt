@@ -12,6 +12,10 @@ abstract class AS73XXSensor(protected val busPath: String) {
         protected const val TAG = "AS73XXSensor"
         private const val SENSOR_ADDRESS = 0x39
     }
+    
+    // Abstract register definitions that must be provided by child classes
+    protected abstract val REG_ATIME: Int
+    protected abstract val REG_ASTEP_L: Int
 
     protected var fileDescriptor: Int = -1
     protected var isInitialized: Boolean = false
@@ -158,5 +162,28 @@ abstract class AS73XXSensor(protected val busPath: String) {
         // Write LSB first, then MSB
         writeByteReg(fd, lsbRegister, lsb)
         writeByteReg(fd, lsbRegister + 1, msb)
+    }
+
+    protected fun setIntegrationTime(fd: Int, atime: Int, astep: Int) {
+        if (fd < 0) return
+        val safeAtime = atime.coerceIn(0, 255)
+        val safeAstep = astep.coerceIn(0, 65534)
+        if (safeAtime == 0 && safeAstep == 0) {
+            Log.e(TAG, "ATIME and ASTEP cannot both be 0. Setting ASTEP=1.")
+            setIntegrationTimeInternal(fd, 0, 1)
+            return
+        }
+        setIntegrationTimeInternal(fd, safeAtime, safeAstep)
+    }
+
+    private fun setIntegrationTimeInternal(fd: Int, atime: Int, astep: Int) {
+        try {
+            Log.d(TAG, "Setting ATIME=$atime, ASTEP=$astep on fd=$fd")
+            //setBank(fd, false) // Ensure Bank 0
+            writeByteReg(fd, REG_ATIME, atime)
+            writeWordReg(fd, REG_ASTEP_L, astep)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting integration time for fd=$fd: ${e.message}", e)
+        }
     }
 }
