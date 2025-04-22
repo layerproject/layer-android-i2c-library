@@ -30,7 +30,7 @@ abstract class AS73XXSensor(protected val busPath: String) {
      * Checks if the sensor is connected *and* initialized.
      * @return true if connected and initialized, false otherwise
      */
-    protected fun isReady(): Boolean {
+    fun isReady(): Boolean {
         return isInitialized && fileDescriptor >= 0
     }
 
