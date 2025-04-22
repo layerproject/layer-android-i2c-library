@@ -32,8 +32,6 @@ abstract class AS73XXSensor(protected val busPath: String) {
      */
     abstract fun readSpectralData(): Map<String, Int>
 
-    abstract fun togglePower(fd: Int, on: Boolean)
-
     abstract fun initializeSensor(fd: Int): Boolean
 
     /**
@@ -221,7 +219,7 @@ abstract class AS73XXSensor(protected val busPath: String) {
      * @param fd File descriptor for the I2C connection
      * @param on True to power on, false to power off
      */
-    override fun togglePower(fd: Int, on: Boolean) {
+    protected fun togglePower(fd: Int, on: Boolean) {
         if (fd < 0) return
         try {
             // Power control is in Bank 0, ensure it's selected

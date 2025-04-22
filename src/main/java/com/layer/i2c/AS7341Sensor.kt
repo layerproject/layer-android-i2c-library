@@ -169,8 +169,6 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
 
-    // Using parent class setBank method instead
-
     /**
      * Enables or disables the SMUX (Sensor Mux) functionality.
      */
@@ -238,10 +236,6 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
             I2cNative.writeByte(fd, register, value)
         }
     }
-
-    // Using parent class enableSpectralMeasurement method instead
-
-    // Using parent class setGain method instead
 
     fun readID(): Int {
         if (!isInitialized) {

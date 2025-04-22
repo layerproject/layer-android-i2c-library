@@ -124,23 +124,6 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         return primaryMap
     }
 
-    // Optional: Expose configuration methods from SensorManager if needed by the app
-    private fun setGain(gainValue: Int) {
-        if (!isReady()) {
-            Log.e(TAG, "Cannot set gain: Sensor not initialized on $busPath.")
-            return
-        }
-        setGain(fileDescriptor, gainValue)
-    }
-
-    private fun setIntegrationTime(atime: Int, astep: Int) {
-        if (!isReady()) {
-            Log.e(TAG, "Cannot set integration time: Sensor not initialized on $busPath.")
-            return
-        }
-        setIntegrationTime(fileDescriptor, atime, astep)
-    }
-
     /**
      * Initializes the AS7343 sensor with default settings for measurement.
      * MUST be called after opening the sensor.
@@ -237,16 +220,6 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         }
     }
 
-    // --- Configuration Methods ---
-    
-    // Using parent class setGain method instead
-    
-    // Using parent class togglePower method instead
-
-    // --- Internal Helper Methods ---
-
-    // Using parent class enableSpectralMeasurement method instead
-
     private fun getIsDataReady(fd: Int): Boolean {
         // Assumes Bank 0 is selected
         val status = readByteReg(fd, AS7343_STATUS2_REG)
@@ -270,7 +243,6 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         return true // Data is ready
     }
 
-
     private fun readDataChannel(fd: Int, channelIndex: Int): Int {
         // Assumes Bank 0 is selected
         val dataLReg = AS7343_DATA0_L_REG + (channelIndex * 2)
@@ -279,6 +251,4 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         val dataH = readByteReg(fd, dataHReg)
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
-
-    // Using parent class setBank method instead
 }
