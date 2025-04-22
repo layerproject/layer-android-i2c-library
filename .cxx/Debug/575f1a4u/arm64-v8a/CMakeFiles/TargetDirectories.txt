@@ -1,3 +1,0 @@
-/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/Debug/575f1a4u/arm64-v8a/CMakeFiles/I2cNative.dir
-/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/Debug/575f1a4u/arm64-v8a/CMakeFiles/edit_cache.dir
-/Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/Debug/575f1a4u/arm64-v8a/CMakeFiles/rebuild_cache.dir

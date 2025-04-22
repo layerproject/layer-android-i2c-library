@@ -1,4 +1,0 @@
-/Users/gilles/Library/Android/sdk/cmake/3.22.1/bin/ninja \
-  -C \
-  /Users/gilles/Documents/layerproject/layer-android-i2c-library/.cxx/RelWithDebInfo/2c4q2e6u/x86_64 \
-  I2cNative
