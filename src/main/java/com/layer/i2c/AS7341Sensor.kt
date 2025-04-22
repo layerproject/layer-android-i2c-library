@@ -112,7 +112,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         Log.d(TAG, "Setting gain to $gainValue")
         setGain(fileDescriptor, gainValue)
 
-
+        setIntegrationTime(fd, 0, 65534)
 
         return true
     }

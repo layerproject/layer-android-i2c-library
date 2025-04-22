@@ -173,7 +173,6 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             // So we use the following values to get ~100ms total exposure time:
             //setIntegrationTime(fd, atime = 35, astep = 999)
 
-            // Total integration time of
             setIntegrationTime(fd, 0, 65534)
 
             // Gain: AGAIN (0=0.5x, 9=256x(default), 12=2048x)
