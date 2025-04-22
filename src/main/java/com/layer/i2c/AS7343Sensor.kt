@@ -8,8 +8,14 @@ import android.util.Log
  */
 class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     // Implement abstract register properties
-    override val REG_ATIME: Int = 0x81    // Integration Time ADC cycles LSB
-    override val REG_ASTEP_L: Int = 0xD4  // Integration Time Step Size LSB (16-bit)
+    override val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB
+    override val REG_ASTEP_L: Int = 0xD4      // Integration Time Step Size LSB (16-bit)
+    override val REG_CONFIG0: Int = 0xBF      // Bank selection register
+    override val BIT_REGBANK: Int = 4         // Bank selection bit position
+    override val REG_ENABLE: Int = 0x80       // Enable register 
+    override val BIT_POWER: Int = 0           // Power bit position
+    override val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
+    override val REG_CFG1: Int = 0xC6         // Gain configuration register
     
     companion object {
         private const val TAG = "AS7343Sensor"
@@ -17,11 +23,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         // --- AS7343 Register Addresses (Verified from Datasheet) ---
 
         // Configuration Registers (Bank 0 unless noted)
-        private const val AS7343_ENABLE_REG = 0x80      // Enable Register
         private const val AS7343_WTIME_REG = 0x83       // Wait Time cycles
-
-        private const val AS7343_CFG0_REG = 0xBF        // Bank Select, Low Power Idle, WLONG
-        private const val AS7343_CFG1_REG = 0xC6        // AGAIN (Spectral Gain)
         private const val AS7343_CFG20_REG = 0xD6       // auto_smux setting, FD FIFO 8b mode
         private const val AS7343_LED_REG = 0xCD         // LED Control (ACT, DRIVE) (Bank 1)
 
@@ -35,10 +37,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         // Register Bits
         private const val AS7343_ENABLE_FDEN_BIT = 6      // Flicker Detect Enable
         private const val AS7343_ENABLE_WEN_BIT = 3       // Wait Enable
-        private const val AS7343_ENABLE_SP_EN_BIT = 1     // Spectral Measurement Enable
-        private const val AS7343_ENABLE_PON_BIT = 0       // Power ON
         private const val AS7343_STATUS2_AVALID_BIT = 6   // Spectral Data Valid
-        private const val AS7343_CFG0_REG_BANK_BIT = 4    // Register Bank Select (0=0x80+, 1=0x20-0x7F)
         private const val AS7343_CFG20_AUTO_SMUX_SHIFT = 5
         private const val AS7343_AUTO_SMUX_MODE_18CH = 3 // Value for 18-channel read
         private const val AS7343_LED_LED_ACT_BIT = 7      // LED Activation
@@ -239,46 +238,14 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     }
 
     // --- Configuration Methods ---
-
-    fun setGain(fd: Int, againValue: Int) {
-        if (fd < 0) return
-        val safeAgain = againValue.coerceIn(0, 12)
-        try {
-            Log.d(TAG, "Setting Gain (AGAIN) on fd=$fd to $safeAgain")
-            setBank(fd, false) // Ensure Bank 0
-            setRegisterBits(fd, AS7343_CFG1_REG, 0, 5, safeAgain)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting gain for fd=$fd: ${e.message}", e)
-        }
-    }
-
-    // --- Power Control ---
-    override fun togglePower(fd: Int, on: Boolean) {
-        if (fd < 0) return
-        try {
-            // Power control is in Bank 0, ensure it's selected
-            setBank(fd, false)
-            Log.d(TAG, "Setting Power ${if (on) "ON" else "OFF"} on fd=$fd")
-            enableBit(fd, AS7343_ENABLE_REG, AS7343_ENABLE_PON_BIT, on)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error toggling power for fd=$fd: ${e.message}", e)
-        }
-    }
+    
+    // Using parent class setGain method instead
+    
+    // Using parent class togglePower method instead
 
     // --- Internal Helper Methods ---
 
-    private fun enableSpectralMeasurement(fd: Int, enable: Boolean) {
-        // Assumes Bank 0 is selected
-        if (enable) {
-            val enableReg = readByteReg(fd, AS7343_ENABLE_REG)
-            if (enableReg and (1 shl AS7343_ENABLE_PON_BIT) == 0) {
-                Log.w(TAG, "Warning: Enabling SP_EN while PON is OFF for fd=$fd. Enabling PON first.")
-                togglePower(fd, true)
-                Thread.sleep(1) // Small delay after PON
-            }
-        }
-        enableBit(fd, AS7343_ENABLE_REG, AS7343_ENABLE_SP_EN_BIT, enable)
-    }
+    // Using parent class enableSpectralMeasurement method instead
 
     private fun getIsDataReady(fd: Int): Boolean {
         // Assumes Bank 0 is selected
@@ -313,20 +280,5 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
 
-    private fun setBank(fd: Int, accessBank1: Boolean) {
-        // This function might be called when already in Bank 1, but needs Bank 0 access to modify CFG0
-        // For simplicity, we assume we can always read CFG0 initially (might require temporary switch if robust needed)
-        // Safest approach might be: always switch to bank 0, read CFG0, write if needed.
-        // Current simpler approach: Read CFG0 (assuming Bank 0 access), write if needed.
-
-        val targetBank = if (accessBank1) 1 else 0
-        val cfg0Val = readByteReg(fd, AS7343_CFG0_REG) // Read current value (needs Bank 0 access)
-        val currentBank = (cfg0Val shr AS7343_CFG0_REG_BANK_BIT) and 1
-
-        if (currentBank != targetBank) {
-            Log.d(TAG, "Setting Register Bank Access to $targetBank on fd=$fd")
-            enableBit(fd, AS7343_CFG0_REG, AS7343_CFG0_REG_BANK_BIT, accessBank1)
-            // Thread.sleep(1) // Optional short delay
-        }
-    }
+    // Using parent class setBank method instead
 }

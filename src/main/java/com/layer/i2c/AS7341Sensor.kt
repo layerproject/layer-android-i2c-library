@@ -8,8 +8,14 @@ import android.util.Log
  */
 class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     // Implement abstract register properties
-    override val REG_ATIME: Int = 0x81    // Integration Time ADC cycles LSB 
-    override val REG_ASTEP_L: Int = 0xCA  // Integration Time Step Size LSB (16-bit)
+    override val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB 
+    override val REG_ASTEP_L: Int = 0xCA      // Integration Time Step Size LSB (16-bit)
+    override val REG_CONFIG0: Int = 0xa9      // Bank selection register
+    override val BIT_REGBANK: Int = 4         // Bank selection bit position
+    override val REG_ENABLE: Int = 0x80       // Enable register 
+    override val BIT_POWER: Int = 0           // Power bit position
+    override val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
+    override val REG_CFG1: Int = 0xaa         // Gain configuration register
     
     companion object {
         private const val TAG = "AS7341Sensor"
@@ -17,12 +23,9 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         private const val AS7341_ID = 0x92
 
         // AS7341 registers
-        private const val REG_ENABLE = 0x80
         private const val REG_STATUS2 = 0xa3
-        private const val REG_CONFIG0 = 0xa9
         private const val REG_LED_CONFIG = 0x74
         private const val REG_CONFIG = 0x70
-        private const val REG_CFG1 = 0xaa
         private const val REG_CFG6 = 0xaf
 
         // Register data start addresses
@@ -30,10 +33,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         private const val REG_CH0_HIGH = 0x96
 
         // Bit positions
-        private const val BIT_POWER = 0
-        private const val BIT_MEASUREMENT = 1
         private const val BIT_SMUXEN = 4
-        private const val BIT_REGBANK = 4
         private const val BIT_LED_SEL = 3
         private const val BIT_LED_ACT = 4
         private const val BIT_AVALID = 6
@@ -94,27 +94,28 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         return channelDataOne + channelDataTwo
     }
 
-    /**
-     * Toggles the power state of the sensor.
-     *
-     * @param fd File descriptor for the I2C connection
-     * @param on True to power on, false to power off
-     */
-    override fun togglePower(fd: Int, on: Boolean) {
-        enableBit(fd, REG_ENABLE, BIT_POWER, on)
-    }
-
     override fun initializeSensor(fd: Int): Boolean {
-        togglePower(fd, true)
-        Thread.sleep(5) // Short delay after power on
-
-        val gainValue = 10
-        Log.d(TAG, "Setting gain to $gainValue")
-        setGain(fileDescriptor, gainValue)
-
-        setIntegrationTime(fd, 0, 65534)
-
-        return true
+        if (fd < 0) return false
+        
+        try {
+            // Power up the device
+            togglePower(fd, true)
+            Thread.sleep(5) // Short delay after power on
+            
+            // Set default gain
+            val gainValue = 10 // Higher gain for better low-light sensitivity
+            Log.d(TAG, "Setting gain to $gainValue")
+            setGain(fd, gainValue)
+            
+            // Set integration time
+            setIntegrationTime(fd, 0, 65534)
+            
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during sensor initialization for fd=$fd: ${e.message}", e)
+            try { togglePower(fd, false) } catch (_: Exception) {}
+            return false
+        }
     }
 
     /**
@@ -168,24 +169,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
 
-    /**
-     * Sets the register bank.
-     * Some registers are accessible only when the register bank bit is set.
-     */
-    private fun setBank(fd: Int, access0x60to0x74: Boolean) {
-        val configWord = I2cNative.readWord(fd, REG_CONFIG0)
-        val configWordWrite = if (access0x60to0x74) {
-            configWord or (1 shl BIT_REGBANK)
-        } else {
-            configWord and (1 shl BIT_REGBANK).inv()
-        }
-
-        Log.d(TAG, "Bank config read: $configWord")
-        Log.d(TAG, "Bank config write: $configWordWrite")
-
-        val configRet = I2cNative.writeByte(fd, REG_CONFIG0, configWordWrite)
-        Log.d(TAG, "Bank config write result: $configRet")
-    }
+    // Using parent class setBank method instead
 
     /**
      * Enables or disables the SMUX (Sensor Mux) functionality.
@@ -255,24 +239,9 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         }
     }
 
-    /**
-     * Enables or disables spectral measurement.
-     */
-    private fun enableSpectralMeasurement(fd: Int, enableMeasurement: Boolean) {
-        enableBit(fd, REG_ENABLE, BIT_MEASUREMENT, enableMeasurement)
-    }
+    // Using parent class enableSpectralMeasurement method instead
 
-    private fun setGain(fd: Int, againValue: Int) {
-        if (fd < 0) return
-        val safeAgain = againValue.coerceIn(0, 12)
-        try {
-            Log.d(TAG, "Setting Gain (AGAIN) on fd=$fd to $safeAgain")
-            setBank(fd, false) // Ensure Bank 0
-            setRegisterBits(fd, REG_CFG1, 0, 5, safeAgain)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting gain for fd=$fd: ${e.message}", e)
-        }
-    }
+    // Using parent class setGain method instead
 
     fun readID(): Int {
         if (!isInitialized) {
