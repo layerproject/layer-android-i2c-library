@@ -1,17 +1,14 @@
 package com.layer.i2c
 
 import android.util.Log
-import java.io.IOException
 
 /**
  * High-level interface for the AS7343 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7343Sensor(private val busPath: String) : SpectralSensor {
+class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     companion object {
         private const val TAG = "AS7343Sensor"
-        // AS7343 sensor address - Confirmed 0x39
-        private const val AS7343_ADDRESS = 0x39
 
         // --- AS7343 Register Addresses (Verified from Datasheet) ---
 
@@ -64,75 +61,6 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
         val primaryChannelSimpleNames = listOf(
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "FZ", "FY", "FXL", "NIR", "VIS", "FD"
         )
-    }
-
-    private var fileDescriptor: Int = -1
-
-    // Track initialization status
-    private var isInitialized: Boolean = false
-
-    /**
-     * Opens a connection to the sensor and initializes it.
-     * @return true if connection and initialization were successful, false otherwise
-     */
-    override fun connect(): Boolean {
-        if (isInitialized) {
-            Log.d(TAG, "Sensor on $busPath already connected and initialized.")
-            return true
-        }
-
-        // Already open but not initialized? Close first.
-        if (fileDescriptor >= 0) {
-            Log.w(TAG, "Sensor fd already open but not initialized. Re-opening.")
-            closeSensor(fileDescriptor)
-            fileDescriptor = -1
-        }
-
-        Log.d(TAG, "Connecting to sensor on $busPath...")
-        fileDescriptor = openSensor(busPath)
-        if (fileDescriptor < 0) {
-            Log.e(TAG, "Failed to open sensor on $busPath.")
-            isInitialized = false
-            return false
-        }
-
-        Log.d(TAG, "Sensor opened (fd=$fileDescriptor). Initializing...")
-        // *** Crucial step: Initialize the sensor after opening ***
-        isInitialized = initializeSensor(fileDescriptor)
-
-        if (!isInitialized) {
-            Log.e(TAG, "Failed to initialize sensor on $busPath (fd=$fileDescriptor). Closing.")
-            closeSensor(fileDescriptor)
-            fileDescriptor = -1
-            return false
-        }
-
-        Log.i(TAG, "Sensor on $busPath connected and initialized successfully.")
-        return true
-    }
-
-    /**
-     * Closes the connection to the sensor and attempts to power it down.
-     */
-    override fun disconnect() {
-        if (fileDescriptor >= 0) {
-            Log.d(TAG, "Disconnecting sensor on $busPath (fd=$fileDescriptor)...")
-            // Attempt to power down before closing
-            if (isInitialized) { // Only try if we think it was initialized
-                try {
-                    togglePower(fileDescriptor, false)
-                    Log.d(TAG, "Sensor powered down.")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error powering down sensor during disconnect: ${e.message}")
-                }
-            }
-            closeSensor(fileDescriptor)
-            fileDescriptor = -1
-            isInitialized = false
-            Log.i(TAG, "Sensor on $busPath disconnected.")
-        } else {
-            Log.d(TAG, "Sensor on $busPath already disconnected.")
-        }
     }
 
     /**
@@ -195,45 +123,8 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
         return primaryMap
     }
 
-    /**
-     * Controls the sensor's built-in LED.
-     * Requires the sensor to be connected and initialized.
-     * @param on True to turn the LED on, false to turn it off
-     * @param current LED drive strength (0-127, see datasheet for mA mapping) when turning on
-     */
-    fun controlLED(on: Boolean, current: Int = 4) { // Default to 12mA (value 4)
-        if (!isInitialized) {
-            Log.e(TAG, "Cannot control LED: Sensor not initialized on $busPath.")
-            return
-        }
-
-        if (on) {
-            // Set current only when turning on, to avoid changing it when turning off
-            setLEDCurrent(fileDescriptor, current)
-        }
-        // Use the correct function name from the updated SensorManager
-        toggleLEDActivation(fileDescriptor, on)
-    }
-
-    /**
-     * Checks if the sensor is connected *and* initialized.
-     * @return true if connected and initialized, false otherwise
-     */
-    override fun isReady(): Boolean {
-        return isInitialized && fileDescriptor >= 0
-    }
-
-    /**
-     * Returns the file descriptor of the I2C connection.
-     * Useful for direct access via the SensorManager if needed, but check isReady() first.
-     * @return I2C file descriptor, or -1 if not connected/initialized
-     */
-    override fun getFileDescriptor(): Int {
-        return if (isReady()) fileDescriptor else -1
-    }
-
     // Optional: Expose configuration methods from SensorManager if needed by the app
-    fun setGain(gainValue: Int) {
+    private fun setGain(gainValue: Int) {
         if (!isReady()) {
             Log.e(TAG, "Cannot set gain: Sensor not initialized on $busPath.")
             return
@@ -241,7 +132,7 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
         setGain(fileDescriptor, gainValue)
     }
 
-    fun setIntegrationTime(atime: Int, astep: Int) {
+    private fun setIntegrationTime(atime: Int, astep: Int) {
         if (!isReady()) {
             Log.e(TAG, "Cannot set integration time: Sensor not initialized on $busPath.")
             return
@@ -250,32 +141,12 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
     }
 
     /**
-     * Opens an I2C connection to an AS7343 sensor on the specified bus.
-     */
-    private fun openSensor(busPath: String): Int {
-        val fd = I2cNative.openBus(busPath, AS7343_ADDRESS)
-        if (fd < 0) {
-            Log.e(TAG, "Failed to open I2C bus $busPath for address $AS7343_ADDRESS")
-        }
-        return fd
-    }
-
-    /**
-     * Closes an I2C connection.
-     */
-    fun closeSensor(fd: Int) {
-        if (fd >= 0) {
-            I2cNative.closeBus(fd)
-        }
-    }
-
-    /**
      * Initializes the AS7343 sensor with default settings for measurement.
      * MUST be called after opening the sensor.
      * @param fd File descriptor for the I2C connection
      * @return true if initialization succeeds, false otherwise.
      */
-    fun initializeSensor(fd: Int): Boolean {
+    override fun initializeSensor(fd: Int): Boolean {
         if (fd < 0) return false
         Log.d(TAG, "Initializing sensor on fd=$fd...")
         try {
@@ -298,10 +169,13 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
             //   Then ATIME = (100ms / 2.78ms) - 1 ≈ 35
             //
             // So we use the following values to get ~100ms total exposure time:
-            setIntegrationTime(fd, atime = 35, astep = 999)
+            //setIntegrationTime(fd, atime = 35, astep = 999)
+
+            // Total integration time of
+            setIntegrationTime(fd, 0, 65534)
 
             // Gain: AGAIN (0=0.5x, 9=256x(default), 12=2048x)
-            setGain(fd, againValue = 9)
+            setGain(fd, 9)
 
             Log.d(TAG, "Sensor fd=$fd initialized successfully.")
             return true
@@ -400,40 +274,8 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
         }
     }
 
-    // --- LED Control Methods ---
-
-    fun setLEDCurrent(fd: Int, driveValue: Int) {
-        if (fd < 0) return
-        val safeDriveValue = driveValue.coerceIn(0, 127)
-        try {
-            Log.d(TAG, "Setting LED Current on fd=$fd to setting $safeDriveValue")
-            setBank(fd, true) // Bank 1 for LED register
-            val ledReg = AS7343_LED_REG
-            var ledWord = readByteReg(fd, ledReg)
-            ledWord = (ledWord and (1 shl AS7343_LED_LED_ACT_BIT)) or (safeDriveValue and AS7343_LED_LED_DRIVE_MASK)
-            writeByteReg(fd, ledReg, ledWord)
-            setBank(fd, false) // Revert to Bank 0
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting LED current for fd=$fd: ${e.message}", e)
-            try { setBank(fd, false) } catch (_: Exception) {} // Try to revert bank
-        }
-    }
-
-    fun toggleLEDActivation(fd: Int, on: Boolean) {
-        if (fd < 0) return
-        try {
-            Log.d(TAG, "Setting LED Activation ${if (on) "ON" else "OFF"} on fd=$fd")
-            setBank(fd, true) // Bank 1 for LED register
-            enableBit(fd, AS7343_LED_REG, AS7343_LED_LED_ACT_BIT, on)
-            setBank(fd, false) // Revert to Bank 0
-        } catch (e: Exception) {
-            Log.e(TAG, "Error toggling LED activation for fd=$fd: ${e.message}", e)
-            try { setBank(fd, false) } catch (_: Exception) {} // Try to revert bank
-        }
-    }
-
     // --- Power Control ---
-    fun togglePower(fd: Int, on: Boolean) {
+    override fun togglePower(fd: Int, on: Boolean) {
         if (fd < 0) return
         try {
             // Power control is in Bank 0, ensure it's selected
@@ -508,47 +350,5 @@ class AS7343Sensor(private val busPath: String) : SpectralSensor {
             enableBit(fd, AS7343_CFG0_REG, AS7343_CFG0_REG_BANK_BIT, accessBank1)
             // Thread.sleep(1) // Optional short delay
         }
-    }
-
-    // --- I2C Primitive Helpers ---
-
-    private fun enableBit(fd: Int, register: Int, bit: Int, on: Boolean) {
-        val regValue = readByteReg(fd, register)
-        val bitMask = (1 shl bit)
-        val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
-        if (newValue != regValue) {
-            writeByteReg(fd, register, newValue)
-        }
-    }
-
-    private fun setRegisterBits(fd: Int, register: Int, shift: Int, width: Int, value: Int) {
-        var regValue = readByteReg(fd, register)
-        val mask = ((1 shl width) - 1) shl shift
-        regValue = (regValue and mask.inv()) or ((value shl shift) and mask)
-        writeByteReg(fd, register, regValue)
-    }
-
-    private fun readByteReg(fd: Int, register: Int): Int {
-        // Assuming I2cNative.readWord handles setting the register address implicitly
-        val result = I2cNative.readWord(fd, register)
-        if (result < 0) {
-            throw IOException("I2C Read Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
-        }
-        return result and 0xFF
-    }
-
-    private fun writeByteReg(fd: Int, register: Int, value: Int) {
-        val result = I2cNative.writeByte(fd, register, value)
-        if (result < 0) {
-            throw IOException("I2C Write Error on fd=$fd, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result")
-        }
-    }
-
-    private fun writeWordReg(fd: Int, lsbRegister: Int, value: Int) {
-        val lsb = value and 0xFF
-        val msb = (value shr 8) and 0xFF
-        // Write LSB first, then MSB
-        writeByteReg(fd, lsbRegister, lsb)
-        writeByteReg(fd, lsbRegister + 1, msb)
     }
 }

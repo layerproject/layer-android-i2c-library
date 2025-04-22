@@ -27,14 +27,6 @@ class SensorDemo {
         if (sensor1Ready) {
             Log.d(TAG, "Sensor 1 ready (Connected & Initialized)")
 
-            // Optional: Set custom gain/time if needed after connecting
-            // sensor1.setGain(10) // e.g., 512x gain
-
-            // Turn on LED (example: 12mA)
-            Log.d(TAG,"Turning Sensor 1 LED ON")
-            sensor1.controlLED(true, 4) // Use value 4 for 12mA
-            Thread.sleep(100) // Give LED time to turn on
-
             // Read sensor data (using the method for already connected sensors)
             val data1 = sensor1.readSpectralData() // Returns primary channels map
             if (data1.isNotEmpty()) {
@@ -45,11 +37,6 @@ class SensorDemo {
             } else {
                  Log.w(TAG, "Sensor 1 read returned empty data.")
             }
-
-
-            // Turn off LED
-            Log.d(TAG,"Turning Sensor 1 LED OFF")
-            sensor1.controlLED(false)
         } else {
             Log.e(TAG, "Failed to connect/initialize Sensor 1 on /dev/i2c-0")
         }
@@ -59,11 +46,6 @@ class SensorDemo {
         if (sensor2Ready) {
             Log.d(TAG, "Sensor 2 ready (Connected & Initialized)")
 
-             // Turn on LED with different current (example: 20mA, value 8)
-            Log.d(TAG,"Turning Sensor 2 LED ON")
-            sensor2.controlLED(true, 8) // Use value 8 for 20mA
-            Thread.sleep(100)
-
             // Read sensor data
             val data2 = sensor2.readSpectralData()
              if (data2.isNotEmpty()) {
@@ -71,10 +53,6 @@ class SensorDemo {
             } else {
                  Log.w(TAG, "Sensor 2 read returned empty data.")
             }
-
-            // Turn off LED
-            Log.d(TAG,"Turning Sensor 2 LED OFF")
-            sensor2.controlLED(false)
         } else {
             Log.e(TAG, "Failed to connect/initialize Sensor 2 on /dev/i2c-1")
         }

@@ -1,18 +1,15 @@
 package com.layer.i2c
 
 import android.util.Log
-import java.io.IOException
 
 /**
  * High-level interface for the AS7341 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7341Sensor(private val busPath: String) : SpectralSensor {
+class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     companion object {
         private const val TAG = "AS7341Sensor"
 
-        // AS7341 sensor address - typically this is fixed at 0x39
-        private const val AS7341_ADDRESS = 0x39
         private const val AS7341_ID = 0x92
 
         // AS7341 registers
@@ -38,41 +35,8 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
         private const val BIT_AVALID = 6
     }
 
-    private var fileDescriptor: Int = -1
-    private var isConnected: Boolean = false
-    
-    /**
-     * Opens a connection to the sensor.
-     * @return true if connection was successful, false otherwise
-     */
-    override fun connect(): Boolean {
-        Log.d(TAG, "Connecting sensor")
-        if (isConnected) {
-            return true
-        }
-        
-        fileDescriptor = openSensor(busPath)
-        isConnected = fileDescriptor >= 0
-
-        if (isConnected) {
-            setGain(fileDescriptor, 9)
-        }
-        return isConnected
-    }
-
     fun isCorrectSensor(): Boolean {
         return (readID() == 36)
-    }
-    
-    /**
-     * Closes the connection to the sensor.
-     */
-    override fun disconnect() {
-        if (isConnected) {
-            closeSensor(fileDescriptor)
-            fileDescriptor = -1
-            isConnected = false
-        }
     }
     
     /**
@@ -80,7 +44,7 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
      * @return Map of channel names to values, or empty map if not connected
      */
     override fun readSpectralData(): Map<String, Int> {
-        return if (isConnected) {
+        return if (isInitialized) {
             val data = readAllChannels(fileDescriptor)
             Log.d(TAG, "Sensor read spectral data: $data")
             data
@@ -88,58 +52,6 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
             Log.e(TAG, "Sensor not connected, cannot read data")
             emptyMap()
         }
-    }
-    
-    /**
-     * Controls the sensor's built-in LED.
-     * @param on True to turn the LED on, false to turn it off
-     * @param current LED current (0-127) when turning on
-     */
-    fun controlLED(on: Boolean, current: Int = 30) {
-        if (!isConnected) {
-            return
-        }
-        
-        if (on) {
-            setLEDCurrent(fileDescriptor, current)
-        }
-        toggleLED(fileDescriptor, on)
-    }
-    
-    /**
-     * Checks if the sensor is connected.
-     * @return true if connected, false otherwise
-     */
-    override fun isReady(): Boolean {
-        return isConnected
-    }
-    
-    /**
-     * Returns the file descriptor of the I2C connection.
-     * Useful for direct access via the SensorManager if needed.
-     * @return I2C file descriptor, or -1 if not connected
-     */
-    override fun getFileDescriptor(): Int {
-        return fileDescriptor
-    }
-
-    /**
-     * Opens an I2C connection to an AS7341 sensor on the specified bus.
-     *
-     * @param busPath The path to the I2C bus (e.g. "/dev/i2c-0")
-     * @return File descriptor for the opened bus, or -1 if failed
-     */
-    fun openSensor(busPath: String): Int {
-        return I2cNative.openBus(busPath, AS7341_ADDRESS)
-    }
-
-    /**
-     * Closes an I2C connection.
-     *
-     * @param fd File descriptor of the I2C connection to close
-     */
-    fun closeSensor(fd: Int) {
-        I2cNative.closeBus(fd)
     }
 
     /**
@@ -184,72 +96,18 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
      * @param fd File descriptor for the I2C connection
      * @param on True to power on, false to power off
      */
-    fun togglePower(fd: Int, on: Boolean) {
-        enable(fd, BIT_POWER, on)
+    override fun togglePower(fd: Int, on: Boolean) {
+        enableBit(fd, REG_ENABLE, BIT_POWER, on)
     }
 
-    /**
-     * Sets the LED current for the sensor.
-     *
-     * @param fd File descriptor for the I2C connection
-     * @param current Current value (0-127)
-     */
-    fun setLEDCurrent(fd: Int, current: Int) {
-        setBank(fd, true)
+    override fun initializeSensor(fd: Int): Boolean {
+        togglePower(fd, true)
+        Thread.sleep(5) // Short delay after power on
 
-        val ledRegister = REG_LED_CONFIG
-        val ledWord = I2cNative.readWord(fd, ledRegister)
-        Log.d(TAG, "LED current read: $ledWord")
-
-        var data = 0
-        data = data or (1 shl 7)
-        data = data or (current and 0x7f)
-
-        val ledRet = I2cNative.writeByte(fd, ledRegister, data)
-        Log.d(TAG, "LED current write result: $ledRet")
-
-        setBank(fd, false)
-    }
-
-    /**
-     * Toggles the LED state.
-     *
-     * @param fd File descriptor for the I2C connection
-     * @param on True to turn LED on, false to turn off
-     */
-    fun toggleLED(fd: Int, on: Boolean) {
-        val configRegister = REG_CONFIG
-        val ledRegister = REG_LED_CONFIG
-
-        setBank(fd, true)
-
-        val configWord = I2cNative.readWord(fd, configRegister)
-        val configWordWrite = if (on) {
-            configWord or (1 shl BIT_LED_SEL)
-        } else {
-            configWord and (1 shl BIT_LED_SEL).inv()
-        }
-
-        Log.d(TAG, "Config read: $configWord")
-        Log.d(TAG, "Config write: $configWordWrite")
-
-        val configRet = I2cNative.writeByte(fd, configRegister, configWordWrite)
-        Log.d(TAG, "Config write result: $configRet")
-
-        val ledWord = I2cNative.readWord(fd, ledRegister)
-        val ledWordWrite = if (on) {
-            ledWord or (1 shl BIT_LED_ACT)
-        } else {
-            ledWord and (1 shl BIT_LED_ACT).inv()
-        }
-
-        Log.d(TAG, "LED read: $ledWord")
-        Log.d(TAG, "LED write: $ledWordWrite")
-
-        val ledRet = I2cNative.writeByte(fd, ledRegister, ledWordWrite)
-        Log.d(TAG, "LED write result: $ledRet")
-
-        setBank(fd, false)
+        val gainValue = 9
+        Log.d(TAG, "Setting gain to $gainValue")
+        setGain(fileDescriptor, gainValue)
+        return true
     }
 
     /**
@@ -300,18 +158,7 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
         val dataL = readByteReg(fd, dataLReg)
         val dataH = readByteReg(fd, dataHReg)
 
-        Log.d(TAG, "readChannel: $dataLReg $dataHReg $dataL $dataH")
-
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
-    }
-
-    private fun readByteReg(fd: Int, register: Int): Int {
-        // Assuming I2cNative.readWord handles setting the register address implicitly
-        val result = I2cNative.readWord(fd, register)
-        if (result < 0) {
-            throw IOException("I2C Read Error on fd=$fd, reg=0x${register.toString(16)}, code=$result")
-        }
-        return result and 0xFF
     }
 
     /**
@@ -337,26 +184,7 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
      * Enables or disables the SMUX (Sensor Mux) functionality.
      */
     private fun enableSMUX(fd: Int, on: Boolean) {
-        enable(fd, BIT_SMUXEN, on)
-    }
-
-    /**
-     * Helper function to enable or disable a specific bit in the enable register.
-     */
-    private fun enable(fd: Int, bit: Int, on: Boolean) {
-        val enableWord = I2cNative.readWord(fd, REG_ENABLE)
-        Log.d(TAG, "Enable read: $enableWord")
-
-        val enableWordWrite = if (on) {
-            enableWord or (1 shl bit)
-        } else {
-            enableWord and (1 shl bit).inv()
-        }
-
-        Log.d(TAG, "Enable write: $enableWordWrite")
-
-        val enableRet = I2cNative.writeByte(fd, REG_ENABLE, enableWordWrite)
-        Log.d(TAG, "Enable write result: $enableRet")
+        enableBit(fd, REG_ENABLE, BIT_SMUXEN, on)
     }
 
     /**
@@ -424,7 +252,7 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
      * Enables or disables spectral measurement.
      */
     private fun enableSpectralMeasurement(fd: Int, enableMeasurement: Boolean) {
-        enable(fd, BIT_MEASUREMENT, enableMeasurement)
+        enableBit(fd, REG_ENABLE, BIT_MEASUREMENT, enableMeasurement)
     }
 
     private fun setGain(fd: Int, againValue: Int) {
@@ -439,22 +267,8 @@ class AS7341Sensor(private val busPath: String) : SpectralSensor {
         }
     }
 
-    private fun setRegisterBits(fd: Int, register: Int, shift: Int, width: Int, value: Int) {
-        var regValue = readByteReg(fd, register)
-        val mask = ((1 shl width) - 1) shl shift
-        regValue = (regValue and mask.inv()) or ((value shl shift) and mask)
-        writeByteReg(fd, register, regValue)
-    }
-
-    private fun writeByteReg(fd: Int, register: Int, value: Int) {
-        val result = I2cNative.writeByte(fd, register, value)
-        if (result < 0) {
-            throw IOException("I2C Write Error on fd=$fd, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result")
-        }
-    }
-
     fun readID(): Int {
-        if (!isConnected) {
+        if (!isInitialized) {
             return -1
         }
 

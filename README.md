@@ -1,13 +1,14 @@
 # Layer Android I2C Library
 
-An Android library for I2C communication and AS7341 spectral sensor interactions. This library provides a clean API for communicating with I2C devices, with specific support for the AS7341 spectral sensor.
+An Android library for I2C communication and AS73XX spectral sensor interactions. This library provides a clean API for communicating with I2C devices, with specific support for the AS7341 and AS7343 spectral sensors.
 
 ## Features
 
 - Native C code for I2C communication
 - JNI interface for Android
 - High-level Kotlin API for sensor interaction
-- Support for AS7341 spectral sensors
+- Support for AS7341 and AS7343 spectral sensors
+- Common interface for all sensor types
 
 ## Installation
 
@@ -36,7 +37,7 @@ Then add the dependency to your module's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.layer:i2c:1.0.0")
+    implementation("com.layer:i2c:1.0.2")
 }
 ```
 
@@ -46,62 +47,83 @@ dependencies {
 
 ```kotlin
 // Create a sensor instance with bus path
-val sensor = AS7341Sensor("/dev/i2c-0")
+val sensor = AS7343Sensor("/dev/i2c-0")
 
 // Connect to the sensor
 if (sensor.connect()) {
     // Read spectral data
     val channelData = sensor.readSpectralData()
     
-    // Control the LED
-    sensor.controlLED(on = true, current = 30)
-    
     // Disconnect when done
     sensor.disconnect()
 }
 ```
 
-### Advanced Usage
-
-For more advanced usage, you can directly use the `SensorManager` class:
+### Simplified One-time Reading (AS7343)
 
 ```kotlin
-val sensorManager = SensorManager()
-val fd = sensorManager.openSensor("/dev/i2c-0")
+// Create a sensor instance
+val sensor = AS7343Sensor("/dev/i2c-0")
 
-// Enable power
-sensorManager.togglePower(fd, true)
+// Connect, read, and automatically handle initialization
+val data = sensor.readSpectralDataOnce()
 
-// Read spectral data
-val channelData = sensorManager.readAllChannels(fd)
+// Access specific channels
+val nirValue = data["NIR"]
+val f1Value = data["F1"]
+```
 
-// Close connection
-sensorManager.closeSensor(fd)
+### Reading Multiple Sensors
+
+```kotlin
+// Create sensors for different I2C buses
+val sensor1 = AS7343Sensor("/dev/i2c-0")
+val sensor2 = AS7343Sensor("/dev/i2c-1")
+
+// Connect both sensors
+val sensor1Ready = sensor1.connect()
+val sensor2Ready = sensor2.connect()
+
+// Read data from both sensors
+if (sensor1Ready) {
+    val data1 = sensor1.readSpectralData()
+}
+
+if (sensor2Ready) {
+    val data2 = sensor2.readSpectralData()
+}
+
+// Don't forget to disconnect when done
+sensor1.disconnect()
+sensor2.disconnect()
 ```
 
 ## API Documentation
+
+### AS73XXSensor (Abstract Base Class)
+
+Common base class for all spectral sensors.
+
+- `connect()`: Opens a connection to the sensor and initializes it
+- `disconnect()`: Closes the connection and powers down the sensor
+- `readSpectralData()`: Abstract method to read spectral channels
+- `isReady()`: Checks if the sensor is connected and initialized
 
 ### AS7341Sensor
 
 High-level interface for the AS7341 spectral sensor.
 
-- `connect()`: Opens a connection to the sensor
-- `disconnect()`: Closes the connection
+- `readSpectralData()`: Reads all spectral channels (F1-F8, Clear, NIR)
+- `readAllChannels(fd: Int)`: Reads all spectral channels with given file descriptor
+- `isCorrectSensor()`: Validates if the connected device is an AS7341
+
+### AS7343Sensor
+
+High-level interface for the AS7343 spectral sensor.
+
 - `readSpectralData()`: Reads all spectral channels
-- `controlLED(on: Boolean, current: Int)`: Controls the sensor's built-in LED
-- `isConnected()`: Checks if the sensor is connected
-- `getFileDescriptor()`: Gets the I2C file descriptor
-
-### SensorManager
-
-Low-level manager for AS7341 sensor communication.
-
-- `openSensor(busPath: String)`: Opens an I2C connection
-- `closeSensor(fd: Int)`: Closes the connection
-- `readAllChannels(fd: Int)`: Reads all spectral channels
-- `togglePower(fd: Int, on: Boolean)`: Controls sensor power
-- `setLEDCurrent(fd: Int, current: Int)`: Sets LED current
-- `toggleLED(fd: Int, on: Boolean)`: Controls the LED
+- `readSpectralDataOnce()`: Connects, reads data, and filters to primary channels
+- `readAllChannels(fd: Int)`: Reads all 18 spectral channels internally
 
 ### I2cNative
 
