@@ -114,7 +114,7 @@ Common base class for all spectral sensors.
 High-level interface for the AS7341 spectral sensor.
 
 - `readSpectralData()`: Reads all spectral channels (F1-F8, Clear, NIR)
-- `readAllChannels(fd: Int)`: Reads all spectral channels with given file descriptor
+- `readAllChannels()`: Reads all spectral channels with given file descriptor
 - `isCorrectSensor()`: Validates if the connected device is an AS7341
 
 ### AS7343Sensor
@@ -123,7 +123,7 @@ High-level interface for the AS7343 spectral sensor.
 
 - `readSpectralData()`: Reads all spectral channels
 - `readSpectralDataOnce()`: Connects, reads data, and filters to primary channels
-- `readAllChannels(fd: Int)`: Reads all 18 spectral channels internally
+- `readAllChannels()`: Reads all 18 spectral channels internally
 
 ### I2cNative
 

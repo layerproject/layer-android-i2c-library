@@ -49,7 +49,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      */
     override fun readSpectralData(): Map<String, Int> {
         return if (isInitialized) {
-            val data = readAllChannels(fileDescriptor)
+            val data = readAllChannels()
             Log.d(TAG, "Sensor read spectral data: $data")
             data
         } else {
@@ -64,56 +64,56 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @return Map containing the spectral channel values
      */
-    fun readAllChannels(fd: Int): Map<String, Int> {
+    fun readAllChannels(): Map<String, Int> {
         // Enable power
-        togglePower(fd, true)
+        togglePower(true)
 
         // Read low channels (F1-F4)
-        setSMUXLowChannels(fd, true)
-        enableSpectralMeasurement(fd, true)
+        setSMUXLowChannels(true)
+        enableSpectralMeasurement(true)
 
-        while (!getIsDataReady(fd)) {
+        while (!getIsDataReady()) {
             Log.d(TAG, "Awaiting I2C data on low channels")
             Thread.sleep(10)
         }
 
-        val channelDataOne = readSpectralDataOne(fd)
+        val channelDataOne = readSpectralDataOne()
 
         // Read high channels (F5-F8 plus Clear and NIR)
-        setSMUXLowChannels(fd, false)
-        enableSpectralMeasurement(fd, true)
+        setSMUXLowChannels(false)
+        enableSpectralMeasurement(true)
 
-        while (!getIsDataReady(fd)) {
+        while (!getIsDataReady()) {
             Log.d(TAG, "Awaiting I2C data on high channels")
             Thread.sleep(10)
         }
 
-        val channelDataTwo = readSpectralDataTwo(fd)
+        val channelDataTwo = readSpectralDataTwo()
 
         // Combine results and return
         return channelDataOne + channelDataTwo
     }
 
-    override fun initializeSensor(fd: Int): Boolean {
-        if (fd < 0) return false
+    override fun initializeSensor(): Boolean {
+        if (fileDescriptor < 0) return false
         
         try {
             // Power up the device
-            togglePower(fd, true)
+            togglePower(true)
             Thread.sleep(5) // Short delay after power on
             
             // Set default gain
             val gainValue = 10 // Higher gain for better low-light sensitivity
             Log.d(TAG, "Setting gain to $gainValue")
-            setGain(fd, gainValue)
+            setGain(gainValue)
             
             // Set integration time
-            setIntegrationTime(fd, 0, 65534)
+            setIntegrationTime(0, 65534)
             
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Error during sensor initialization for fd=$fd: ${e.message}", e)
-            try { togglePower(fd, false) } catch (_: Exception) {}
+            Log.e(TAG, "Error during sensor initialization for fd=$fileDescriptor: ${e.message}", e)
+            try { togglePower(false) } catch (_: Exception) {}
             return false
         }
     }
@@ -121,8 +121,8 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Checks if sensor data is ready to be read.
      */
-    private fun getIsDataReady(fd: Int): Boolean {
-        val status = I2cNative.readWord(fd, REG_STATUS2)
+    private fun getIsDataReady(): Boolean {
+        val status = I2cNative.readWord(fileDescriptor, REG_STATUS2)
         Log.d(TAG, "Status read: $status")
         return status and (1 shl BIT_AVALID) != 0
     }
@@ -130,26 +130,26 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Reads the first set of spectral data channels (F1-F4).
      */
-    private fun readSpectralDataOne(fd: Int): MutableMap<String, Int> {
+    private fun readSpectralDataOne(): MutableMap<String, Int> {
         val channelData = mutableMapOf<String, Int>()
-        channelData["F1"] = readChannel(fd, 0)
-        channelData["F2"] = readChannel(fd, 1)
-        channelData["F3"] = readChannel(fd, 2)
-        channelData["F4"] = readChannel(fd, 3)
+        channelData["F1"] = readChannel(0)
+        channelData["F2"] = readChannel(1)
+        channelData["F3"] = readChannel(2)
+        channelData["F4"] = readChannel(3)
         return channelData
     }
 
     /**
      * Reads the second set of spectral data channels (F5-F8, Clear, NIR).
      */
-    private fun readSpectralDataTwo(fd: Int): MutableMap<String, Int> {
+    private fun readSpectralDataTwo(): MutableMap<String, Int> {
         val channelData = mutableMapOf<String, Int>()
-        channelData["F5"] = readChannel(fd, 0)
-        channelData["F6"] = readChannel(fd, 1)
-        channelData["F7"] = readChannel(fd, 2)
-        channelData["F8"] = readChannel(fd, 3)
-        channelData["Clear"] = readChannel(fd, 4)
-        channelData["NIR"] = readChannel(fd, 5)
+        channelData["F5"] = readChannel(0)
+        channelData["F6"] = readChannel(1)
+        channelData["F7"] = readChannel(2)
+        channelData["F8"] = readChannel(3)
+        channelData["Clear"] = readChannel(4)
+        channelData["NIR"] = readChannel(5)
         return channelData
     }
 
@@ -160,11 +160,11 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param channel Channel number (0-5)
      * @return Channel value as a 16-bit integer
      */
-    private fun readChannel(fd: Int, channel: Int): Int {
+    private fun readChannel(channel: Int): Int {
         val dataLReg = REG_CH0_LOW + (channel * 2)
         val dataHReg = dataLReg + 1
-        val dataL = readByteReg(fd, dataLReg)
-        val dataH = readByteReg(fd, dataHReg)
+        val dataL = readByteReg(dataLReg)
+        val dataH = readByteReg(dataHReg)
 
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
@@ -172,8 +172,8 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Enables or disables the SMUX (Sensor Mux) functionality.
      */
-    private fun enableSMUX(fd: Int, on: Boolean) {
-        enableBit(fd, REG_ENABLE, BIT_SMUXEN, on)
+    private fun enableSMUX(on: Boolean) {
+        enableBit(REG_ENABLE, BIT_SMUXEN, on)
     }
 
     /**
@@ -182,31 +182,31 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @param f1Tof4 True to read F1-F4, false to read F5-F8
      */
-    private fun setSMUXLowChannels(fd: Int, f1Tof4: Boolean) {
-        enableSpectralMeasurement(fd, false)
-        setSMUXCommand(fd, 0x10) // Write SMUX configuration from RAM to SMUX chain
+    private fun setSMUXLowChannels(f1Tof4: Boolean) {
+        enableSpectralMeasurement(false)
+        setSMUXCommand(0x10) // Write SMUX configuration from RAM to SMUX chain
 
         if (f1Tof4) {
-            setupF1F4ClearNIR(fd)
+            setupF1F4ClearNIR()
         } else {
-            setupF5F8ClearNIR(fd)
+            setupF5F8ClearNIR()
         }
 
-        enableSMUX(fd, true)
+        enableSMUX(true)
     }
 
     /**
      * Sets the SMUX command.
      */
-    private fun setSMUXCommand(fd: Int, command: Int) {
-        val smuxCommand = I2cNative.writeByte(fd, REG_CFG6, command)
+    private fun setSMUXCommand(command: Int) {
+        val smuxCommand = I2cNative.writeByte(fileDescriptor, REG_CFG6, command)
         Log.d(TAG, "SMUX command result: $smuxCommand")
     }
 
     /**
      * Sets up sensor configuration for F1-F4 channels.
      */
-    private fun setupF1F4ClearNIR(fd: Int) {
+    private fun setupF1F4ClearNIR() {
         val registerValues = mapOf(
             0x00 to 0x30, 0x01 to 0x01, 0x02 to 0x00, 0x03 to 0x00,
             0x04 to 0x00, 0x05 to 0x42, 0x06 to 0x00, 0x07 to 0x00,
@@ -216,14 +216,14 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         )
 
         registerValues.forEach { (register, value) ->
-            I2cNative.writeByte(fd, register, value)
+            I2cNative.writeByte(fileDescriptor, register, value)
         }
     }
 
     /**
      * Sets up sensor configuration for F5-F8 channels plus Clear and NIR.
      */
-    private fun setupF5F8ClearNIR(fd: Int) {
+    private fun setupF5F8ClearNIR() {
         val registerValues = mapOf(
             0x00 to 0x00, 0x01 to 0x00, 0x02 to 0x00, 0x03 to 0x40,
             0x04 to 0x02, 0x05 to 0x00, 0x06 to 0x10, 0x07 to 0x03,
@@ -233,7 +233,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         )
 
         registerValues.forEach { (register, value) ->
-            I2cNative.writeByte(fd, register, value)
+            I2cNative.writeByte(fileDescriptor, register, value)
         }
     }
 
@@ -242,7 +242,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
             return -1
         }
 
-        val id = readByteReg(fileDescriptor, AS7341_ID)
+        val id = readByteReg(AS7341_ID)
         Log.d(TAG, "Reading sensor ID: $id")
 
         return id

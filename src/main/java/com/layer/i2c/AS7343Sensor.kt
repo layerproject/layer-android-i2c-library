@@ -98,7 +98,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         if (!connect()) {
             return emptyMap()
         }
-        val rawData = readAllChannels(fileDescriptor)
+        val rawData = readAllChannels()
         // Do not disconnect here if caller wants to manage connection externally
         // disconnect()
         if (rawData.isEmpty()) {
@@ -120,7 +120,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             return emptyMap()
         }
 
-        val rawData = readAllChannels(fileDescriptor)
+        val rawData = readAllChannels()
 
         if (rawData.isEmpty()) {
             Log.w(TAG, "Read failed or returned empty data for $busPath.")
@@ -149,19 +149,18 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Initializes the AS7343 sensor with default settings for measurement.
      * MUST be called after opening the sensor.
-     * @param fd File descriptor for the I2C connection
      * @return true if initialization succeeds, false otherwise.
      */
-    override fun initializeSensor(fd: Int): Boolean {
-        if (fd < 0) return false
-        Log.d(TAG, "Initializing sensor on fd=$fd...")
+    override fun initializeSensor(): Boolean {
+        if (fileDescriptor < 0) return false
+        Log.d(TAG, "Initializing sensor on fd=$fileDescriptor...")
         try {
-            setBank(fd, false) // Ensure Bank 0
-            togglePower(fd, true)
+            setBank(false) // Ensure Bank 0
+            togglePower(true)
             Thread.sleep(5) // Short delay after power on
 
             // Configure auto_smux for 18-channel readout
-            setRegisterBits(fd, AS7343_CFG20_REG, AS7343_CFG20_AUTO_SMUX_SHIFT, 2, AS7343_AUTO_SMUX_MODE_18CH)
+            setRegisterBits(AS7343_CFG20_REG, AS7343_CFG20_AUTO_SMUX_SHIFT, 2, AS7343_AUTO_SMUX_MODE_18CH)
             Log.d(TAG, "Set auto_smux mode to 18-channel (3)")
 
             // --- Sensor Configuration Example ---
@@ -177,17 +176,17 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             // So we use the following values to get ~100ms total exposure time:
             //setIntegrationTime(fd, atime = 35, astep = 999)
 
-            setIntegrationTime(fd, 0, 65534)
+            setIntegrationTime(0, 65534)
 
             // Gain: AGAIN (0=0.5x, 9=256x(default), 12=2048x)
-            setGain(fd, 9)
+            setGain(9)
 
-            Log.d(TAG, "Sensor fd=$fd initialized successfully.")
+            Log.d(TAG, "Sensor fd=$fileDescriptor initialized successfully.")
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Error during sensor initialization for fd=$fd: ${e.message}", e)
+            Log.e(TAG, "Error during sensor initialization for fd=$fileDescriptor: ${e.message}", e)
             // Attempt to power off on failure
-            try { togglePower(fd, false) } catch (_: Exception) {}
+            try { togglePower(false) } catch (_: Exception) {}
             return false
         }
     }
@@ -198,59 +197,59 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @return Map containing all 18 data register values (using names from dataRegisterNames), or empty map on error.
      */
-    private fun readAllChannels(fd: Int): Map<String, Int> {
-        if (fd < 0) return emptyMap()
+    private fun readAllChannels(): Map<String, Int> {
+        if (fileDescriptor < 0) return emptyMap()
 
         val channelData = mutableMapOf<String, Int>()
         try {
-            setBank(fd, false) // Ensure Bank 0
-            Log.d(TAG, "Starting spectral measurement on fd=$fd")
+            setBank(false) // Ensure Bank 0
+            Log.d(TAG, "Starting spectral measurement on fd=$fileDescriptor")
 
             // 1. Enable Spectral Measurement
-            enableSpectralMeasurement(fd, true)
+            enableSpectralMeasurement(true)
 
             // 2. Wait for Data Ready
-            if (!waitForDataReady(fd, 2000)) { // Use helper with timeout
-                Log.e(TAG,"Timeout waiting for data ready on fd=$fd")
-                enableSpectralMeasurement(fd, false) // Ensure measurement is disabled
+            if (!waitForDataReady(2000)) { // Use helper with timeout
+                Log.e(TAG,"Timeout waiting for data ready on fd=$fileDescriptor")
+                enableSpectralMeasurement(false) // Ensure measurement is disabled
                 return emptyMap() // Return empty on timeout
             }
-            Log.d(TAG, "Data ready on fd=$fd")
+            Log.d(TAG, "Data ready on fd=$fileDescriptor")
 
             // 3. Read ASTATUS (contains saturation info, read to clear it)
-            readByteReg(fd, AS7343_ASTATUS_REG)
+            readByteReg(AS7343_ASTATUS_REG)
             // We don't use the value, but reading it clears latched status bits
 
             // 4. Read Data Registers
             for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
-                val value = readDataChannel(fd, i)
+                val value = readDataChannel(i)
                 val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
                 channelData[name] = value
             }
 
             // 5. Disable Spectral Measurement
-            enableSpectralMeasurement(fd, false)
-            Log.d(TAG, "Spectral measurement finished on fd=$fd")
+            enableSpectralMeasurement(false)
+            Log.d(TAG, "Spectral measurement finished on fd=$fileDescriptor")
 
             return channelData
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error during readAllChannels for fd=$fd: ${e.message}", e)
+            Log.e(TAG, "Error during readAllChannels for fd=$fileDescriptor: ${e.message}", e)
             // Attempt to disable measurement on error
-            try { enableSpectralMeasurement(fd, false) } catch (_: Exception) {}
+            try { enableSpectralMeasurement(false) } catch (_: Exception) {}
             return emptyMap() // Return empty on error
         }
     }
 
-    private fun getIsDataReady(fd: Int): Boolean {
+    private fun getIsDataReady(): Boolean {
         // Assumes Bank 0 is selected
-        val status = readByteReg(fd, AS7343_STATUS2_REG)
+        val status = readByteReg(AS7343_STATUS2_REG)
         return status and (1 shl AS7343_STATUS2_AVALID_BIT) != 0
     }
 
-    private fun waitForDataReady(fd: Int, timeoutMillis: Long): Boolean {
+    private fun waitForDataReady(timeoutMillis: Long): Boolean {
         val startTime = System.currentTimeMillis()
-        while (!getIsDataReady(fd)) {
+        while (!getIsDataReady()) {
             if (System.currentTimeMillis() - startTime > timeoutMillis) {
                 return false // Timeout
             }
@@ -258,19 +257,19 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
                 Thread.sleep(10) // Polling interval
             } catch (ie: InterruptedException) {
                 Thread.currentThread().interrupt() // Restore interrupt status
-                Log.w(TAG, "Data wait interrupted for fd=$fd")
+                Log.w(TAG, "Data wait interrupted for fd=$fileDescriptor")
                 return false
             }
         }
         return true // Data is ready
     }
 
-    private fun readDataChannel(fd: Int, channelIndex: Int): Int {
+    private fun readDataChannel(channelIndex: Int): Int {
         // Assumes Bank 0 is selected
         val dataLReg = AS7343_DATA0_L_REG + (channelIndex * 2)
         val dataHReg = dataLReg + 1
-        val dataL = readByteReg(fd, dataLReg)
-        val dataH = readByteReg(fd, dataHReg)
+        val dataL = readByteReg(dataLReg)
+        val dataH = readByteReg(dataHReg)
         return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
     }
 }

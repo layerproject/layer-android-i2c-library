@@ -65,13 +65,11 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
     /**
      * Initialize the SHT40 sensor
      */
-    override fun initializeSensor(fd: Int): Boolean {
-        if (fd < 0) return false
+    override fun initializeSensor(): Boolean {
+        if (fileDescriptor < 0) return false
         
         return try {
-            Log.d(TAG, "Initializing SHT40 sensor on fd=$fd")
-
-            fileDescriptor = fd  // Temporarily set fileDescriptor for the reading test
+            Log.d(TAG, "Initializing SHT40 sensor on fd=$fileDescriptor")
 
             if (!softReset()) {
                 Log.e(TAG, "SHT40 sensor soft reset command failed")
@@ -87,7 +85,7 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
 
     @Synchronized
     private fun softReset(): Boolean {
-        if (!switchToDevice(fileDescriptor)) {
+        if (!switchToDevice()) {
             Log.e(TAG, "Failed switching to device ahead of sending command")
             return false
         }
@@ -105,7 +103,7 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
      */
     @Synchronized
     private fun readMeasurement() {
-        if (!switchToDevice(fileDescriptor)) {
+        if (!switchToDevice()) {
             Log.e(TAG, "Failed switching to device ahead of writing command and reading result")
             temperature = DEFAULT_TEMPERATURE
             humidity = DEFAULT_HUMIDITY
