@@ -39,7 +39,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
         private const val BIT_AVALID = 6
     }
 
-    fun isCorrectSensor(): Boolean {
+    override fun isCorrectSensor(): Boolean {
         return (readID() == 36)
     }
     

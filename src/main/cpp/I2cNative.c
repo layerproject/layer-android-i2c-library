@@ -72,7 +72,6 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_openBus
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
     syslog(LOG_INFO, "I2C Log: %s", fileName);
 
-
     int fd = open(fileName, O_RDWR);
 
     syslog(LOG_INFO, "I2C FD: %d", fd);
@@ -121,8 +120,51 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readWord
 JNIEXPORT jlong JNICALL Java_com_layer_i2c_I2cNative_readAllBytes
         (JNIEnv *env, jclass jcl, jint fd, jint address)
 {
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "I2C readAllBytes");
+    closelog();
+
     __u8 addr = address & 0xFF;
     __u8 buffer[4] = {0};
     i2c_smbus_read_i2c_block_data(fd, addr, 4, buffer);
     return (jlong)(buffer[3] << 24 | buffer[2] <<  16 | buffer[1] << 8 | buffer[0]);
+}
+
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
+        (JNIEnv *env, jclass jcl, jint fd, jbyteArray jbuffer, jint length)
+{
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "I2C readRawBytes");
+    closelog();
+
+    if (length <= 0 || length > 32) {
+        return -1; // Invalid length
+    }
+    
+    // Create a local buffer for reading
+    __u8 buffer[32] = {0};
+    
+    // Read data directly from the I2C device without specifying address
+    // This is for reading after a command has been sent
+    int bytesRead = read(fd, buffer, length);
+
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "I2C %d bytes read on FD: %d", bytesRead, fd);
+    closelog();
+    
+    if (bytesRead <= 0) {
+        return -1; // Error reading
+    }
+    
+    // Copy data to the Java byte array
+    (*env)->SetByteArrayRegion(env, jbuffer, 0, bytesRead, (jbyte*)buffer);
+    
+    return bytesRead;
+}
+
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
+        (JNIEnv *env, jclass jcl, jint fd, jint value)
+{
+    __u8 byte = value & 0xFF;
+    return write(fd, &byte, 1);
 }

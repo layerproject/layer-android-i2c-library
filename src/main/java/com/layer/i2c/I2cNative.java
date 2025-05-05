@@ -63,8 +63,29 @@ public class I2cNative {
      * Reads number of bytes from a specified address inside the i2c bus.
      *
      * @param fd            file descriptor of i2c bus
-     * @param address  address in the device
+     * @param address       address in the device
      * @return number that represents 4 bytes read. Negative number if reading failed.
      */
     public static native long readAllBytes(int fd, int address);
+    
+    /**
+     * Reads a specific number of bytes from the current I2C device into the provided buffer.
+     * Note: This method reads from the current device (set by openBus) without specifying
+     * a register address. It's useful for reading data after a command has been sent.
+     *
+     * @param fd         file descriptor of i2c bus
+     * @param buffer     buffer to store the data
+     * @param length     number of bytes to read
+     * @return number of bytes read, or negative value if error
+     */
+    public static native int readRawBytes(int fd, byte[] buffer, int length);
+
+    /**
+     * Writes one byte inside the i2c bus.
+     *
+     * @param fd            file descriptor of i2c bus
+     * @param value         byte to be written to the device
+     * @return result of operation. Zero is OK, everything less than a zero means there was an error.
+     */
+    public static native int write(int fd, int value);
 }

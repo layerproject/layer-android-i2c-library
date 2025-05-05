@@ -62,6 +62,28 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         val primaryChannelSimpleNames = listOf(
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "FZ", "FY", "FXL", "NIR", "VIS", "FD"
         )
+
+        // AS7343 ID register and expected value
+        private const val AS7343_ID_REG = 0x5a
+        private const val AS7343_ID_VALUE = 0
+    }
+    
+    /**
+     * Checks if this is the correct sensor by reading the ID register
+     */
+    override fun isCorrectSensor(): Boolean {
+        if (!isReady()) {
+            return false
+        }
+        
+        try {
+            val id = readByteReg(AS7343_ID_REG)
+            Log.d(TAG, "Reading sensor ID: $id (expected: ${AS7343_ID_VALUE})")
+            return id == AS7343_ID_VALUE
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading sensor ID: ${e.message}")
+            return false
+        }
     }
 
     /**
@@ -195,9 +217,9 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             }
             Log.d(TAG, "Data ready on fd=$fd")
 
-            // 3. Read ASTATUS
-            val aStatus = readByteReg(fd, AS7343_ASTATUS_REG)
-            // Log.d(TAG, "fd=$fd ASTATUS = 0x${aStatus.toString(16)}") // Optional verbose log
+            // 3. Read ASTATUS (contains saturation info, read to clear it)
+            readByteReg(fd, AS7343_ASTATUS_REG)
+            // We don't use the value, but reading it clears latched status bits
 
             // 4. Read Data Registers
             for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
