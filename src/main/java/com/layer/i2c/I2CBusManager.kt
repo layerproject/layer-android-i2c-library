@@ -29,6 +29,9 @@ class I2CBusManager private constructor() {
     // Map to track reference count for each bus
     private val referenceCountMap = ConcurrentHashMap<String, Int>()
     
+    // Map of file descriptors to locks for fd-level synchronization
+    private val fdLockMap = ConcurrentHashMap<Int, Any>()
+    
     /**
      * Opens an I2C bus for a specific address if not already open.
      * If the bus is already open, it increments the reference count.
@@ -54,6 +57,9 @@ class I2CBusManager private constructor() {
             
             // Initialize address set for this bus
             addressMap[busPath] = mutableSetOf(address)
+            
+            // Create a lock object for this file descriptor
+            fdLockMap[fd] = Any()
             
             // Register this device as the current device on this fd
             I2CSensor.setCurrentDevice(fd, address)
@@ -99,6 +105,9 @@ class I2CBusManager private constructor() {
             // Clean up the current device tracking in I2CSensor
             I2CSensor.clearDeviceMapping(fd)
             
+            // Remove the lock object for this file descriptor
+            fdLockMap.remove(fd)
+            
             Log.d(TAG, "Closed I2C bus $busPath (fd=$fd), no more references")
         } else {
             // Decrement reference count
@@ -121,5 +130,17 @@ class I2CBusManager private constructor() {
      */
     fun getBusFd(busPath: String): Int {
         return busMap[busPath] ?: -1
+    }
+    
+    /**
+     * Get the lock object for a file descriptor.
+     * This allows multiple sensors sharing the same file descriptor
+     * to synchronize I/O operations across different instances.
+     * 
+     * @param fd The file descriptor to get the lock for
+     * @return The lock object, or null if the file descriptor is not managed
+     */
+    fun getFdLock(fd: Int): Any? {
+        return fdLockMap[fd]
     }
 }

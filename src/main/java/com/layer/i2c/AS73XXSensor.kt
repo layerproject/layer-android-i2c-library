@@ -59,6 +59,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
      * 
      * @param useBank1 True to select Bank 1, false to select Bank 0
      */
+    @Synchronized
     protected fun setBank(useBank1: Boolean) {
         if (fileDescriptor < 0) return
 
@@ -82,6 +83,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @param on True to power on, false to power off
      */
+    @Synchronized
     protected fun togglePower(on: Boolean) {
         if (fileDescriptor < 0) return
         try {
@@ -97,6 +99,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
     /**
      * Enables or disables spectral measurement.
      */
+    @Synchronized
     protected fun enableSpectralMeasurement(enableMeasurement: Boolean) {
         try {
             setBank(false) // Ensure Bank 0
@@ -118,6 +121,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
     /**
      * Sets the integration time for spectral measurements.
      */
+    @Synchronized
     protected fun setIntegrationTime(atime: Int, astep: Int) {
         if (fileDescriptor < 0) return
         val safeAtime = atime.coerceIn(0, 255)
@@ -130,6 +134,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
         setIntegrationTimeInternal(safeAtime, safeAstep)
     }
 
+    @Synchronized
     private fun setIntegrationTimeInternal(atime: Int, astep: Int) {
         try {
             Log.d(TAG, "Setting ATIME=$atime, ASTEP=$astep on fd=$fileDescriptor")
@@ -147,6 +152,7 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
      * @param againValue Gain value (typically 0-12, where higher values mean higher sensitivity)
      *   0=0.5x, 4=16x, 8=128x, 9=256x(default), 10=512x, 12=2048x
      */
+    @Synchronized
     protected fun setGain(againValue: Int) {
         if (fileDescriptor < 0) return
         val safeAgain = againValue.coerceIn(0, 12)

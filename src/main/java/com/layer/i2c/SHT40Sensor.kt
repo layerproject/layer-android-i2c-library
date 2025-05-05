@@ -83,80 +83,88 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
         }
     }
 
-    @Synchronized
     private fun softReset(): Boolean {
-        if (!switchToDevice()) {
-            Log.e(TAG, "Failed switching to device ahead of sending command")
-            return false
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed switching to device ahead of sending command")
+                return false
+            }
+
+            val writeResult = I2cNative.write(fileDescriptor, 0x94)
+            Log.d(TAG, "Soft reset command result on SHT40: $writeResult")
+
+            Thread.sleep(100)
+            // SHT40 needs about 100ms to soft reset
+
+            return writeResult == 1
         }
-
-        val writeResult = I2cNative.write(fileDescriptor, 0x94)
-        Log.d(TAG, "Soft reset command result on SHT40: $writeResult")
-
-        Thread.sleep(100)
-        // SHT40 needs about 100ms to soft reset
-
-        return writeResult == 1
     }
     /**
      * Read measurement from SHT40 sensor
      */
-    @Synchronized
     private fun readMeasurement() {
-        if (!switchToDevice()) {
-            Log.e(TAG, "Failed switching to device ahead of writing command and reading result")
-            temperature = DEFAULT_TEMPERATURE
-            humidity = DEFAULT_HUMIDITY
-        }
-
-        try {
-            // Send measurement command (single shot, high precision)
-            val writeResult = I2cNative.write(fileDescriptor, CMD_MEASURE_HIGH_PRECISION)
-            Log.d(TAG, "Measure temperature and humidity with high precision on SHT40: $writeResult")
-            
-            // SHT40 needs about 100ms to complete the measurement
-            Thread.sleep(100)
-            
-            // Read 6 bytes: 2 for temperature, 1 CRC, 2 for humidity, 1 CRC
-            val buffer = ByteArray(6)
-            val bytesRead = I2cNative.readRawBytes(fileDescriptor, buffer, 6)
-
-            if (bytesRead == 6) {
-                // Extract temperature (first 2 bytes)
-                val tempRaw = ((buffer[0].toInt() and 0xFF) shl 8) or (buffer[1].toInt() and 0xFF)
-                val tempCrc = buffer[2].toInt() and 0xFF
-
-                // Extract humidity (next 2 bytes)
-                val humRaw = ((buffer[3].toInt() and 0xFF) shl 8) or (buffer[4].toInt() and 0xFF)
-                val humCrc = buffer[5].toInt() and 0xFF
-
-                // Verify CRC (you'll need to implement the CRC-8 algorithm)
-                if (calculateCRC8(buffer, 0, 2) == tempCrc &&
-                    calculateCRC8(buffer, 3, 2) == humCrc) {
-
-                    // Convert raw values to actual temperature and humidity
-                    // Formula should be in the datasheet, but typically:
-                    temperature = TEMPERATURE_OFFSET + TEMPERATURE_SCALE * tempRaw / 65535.0
-                    humidity = HUMIDITY_OFFSET + HUMIDITY_SCALE * humRaw / 65535.0
-
-                    Log.d(TAG, "SHT40 Temperature: $temperature °C, Humidity: $humidity %RH")
-                } else {
-                    Log.e(TAG, "SHT40 CRC check failed")
-                }
-            } else {
-                Log.e(TAG, "Failed to read data block from SHT40: $bytesRead")
+        // Get the fdLock from the parent class
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed switching to device ahead of writing command and reading result")
                 temperature = DEFAULT_TEMPERATURE
                 humidity = DEFAULT_HUMIDITY
                 return
             }
-        } catch (e: IOException) {
-            Log.e(TAG, "I/O error reading from SHT40: ${e.message}")
-            temperature = DEFAULT_TEMPERATURE
-            humidity = DEFAULT_HUMIDITY
-        } catch (e: Exception) {
-            Log.e(TAG, "Error reading from SHT40: ${e.message}")
-            temperature = DEFAULT_TEMPERATURE
-            humidity = DEFAULT_HUMIDITY
+
+            try {
+                // Send measurement command (single shot, high precision)
+                val writeResult = I2cNative.write(fileDescriptor, CMD_MEASURE_HIGH_PRECISION)
+                Log.d(TAG, "Measure temperature and humidity with high precision on SHT40: $writeResult")
+                
+                // SHT40 needs about 100ms to complete the measurement
+                Thread.sleep(100)
+                
+                // Read 6 bytes: 2 for temperature, 1 CRC, 2 for humidity, 1 CRC
+                val buffer = ByteArray(6)
+                val bytesRead = I2cNative.readRawBytes(fileDescriptor, buffer, 6)
+
+                if (bytesRead == 6) {
+                    // Extract temperature (first 2 bytes)
+                    val tempRaw = ((buffer[0].toInt() and 0xFF) shl 8) or (buffer[1].toInt() and 0xFF)
+                    val tempCrc = buffer[2].toInt() and 0xFF
+
+                    // Extract humidity (next 2 bytes)
+                    val humRaw = ((buffer[3].toInt() and 0xFF) shl 8) or (buffer[4].toInt() and 0xFF)
+                    val humCrc = buffer[5].toInt() and 0xFF
+
+                    // Verify CRC (you'll need to implement the CRC-8 algorithm)
+                    if (calculateCRC8(buffer, 0, 2) == tempCrc &&
+                        calculateCRC8(buffer, 3, 2) == humCrc) {
+
+                        // Convert raw values to actual temperature and humidity
+                        // Formula should be in the datasheet, but typically:
+                        temperature = TEMPERATURE_OFFSET + TEMPERATURE_SCALE * tempRaw / 65535.0
+                        humidity = HUMIDITY_OFFSET + HUMIDITY_SCALE * humRaw / 65535.0
+
+                        Log.d(TAG, "SHT40 Temperature: $temperature °C, Humidity: $humidity %RH")
+                    } else {
+                        Log.e(TAG, "SHT40 CRC check failed")
+                    }
+                } else {
+                    Log.e(TAG, "Failed to read data block from SHT40: $bytesRead")
+                    temperature = DEFAULT_TEMPERATURE
+                    humidity = DEFAULT_HUMIDITY
+                    return
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "I/O error reading from SHT40: ${e.message}")
+                temperature = DEFAULT_TEMPERATURE
+                humidity = DEFAULT_HUMIDITY
+            } catch (e: Exception) {
+                Log.e(TAG, "Error reading from SHT40: ${e.message}")
+                temperature = DEFAULT_TEMPERATURE
+                humidity = DEFAULT_HUMIDITY
+            }
         }
     }
 
@@ -183,7 +191,6 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
      * Read data from the sensor, including temperature and humidity
      * @return Map containing temperature and humidity data
      */
-    @Synchronized
     fun readData(): Map<String, Int> {
         try {
             readMeasurement()

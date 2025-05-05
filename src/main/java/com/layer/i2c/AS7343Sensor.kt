@@ -197,6 +197,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @return Map containing all 18 data register values (using names from dataRegisterNames), or empty map on error.
      */
+    @Synchronized
     private fun readAllChannels(): Map<String, Int> {
         if (fileDescriptor < 0) return emptyMap()
 
@@ -241,10 +242,22 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         }
     }
 
+    @Synchronized
     private fun getIsDataReady(): Boolean {
-        // Assumes Bank 0 is selected
-        val status = readByteReg(AS7343_STATUS2_REG)
-        return status and (1 shl AS7343_STATUS2_AVALID_BIT) != 0
+        // Use the shared file descriptor lock
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // Ensure we're talking to the right device
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before getIsDataReady")
+                return false
+            }
+            
+            // Assumes Bank 0 is selected
+            val status = readByteReg(AS7343_STATUS2_REG)
+            return status and (1 shl AS7343_STATUS2_AVALID_BIT) != 0
+        }
     }
 
     private fun waitForDataReady(timeoutMillis: Long): Boolean {
@@ -265,11 +278,22 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     }
 
     private fun readDataChannel(channelIndex: Int): Int {
-        // Assumes Bank 0 is selected
-        val dataLReg = AS7343_DATA0_L_REG + (channelIndex * 2)
-        val dataHReg = dataLReg + 1
-        val dataL = readByteReg(dataLReg)
-        val dataH = readByteReg(dataHReg)
-        return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
+        // Use the shared file descriptor lock
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // Ensure we're talking to the right device
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before readDataChannel")
+                return -1
+            }
+            
+            // Assumes Bank 0 is selected
+            val dataLReg = AS7343_DATA0_L_REG + (channelIndex * 2)
+            val dataHReg = dataLReg + 1
+            val dataL = readByteReg(dataLReg)
+            val dataH = readByteReg(dataHReg)
+            return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
+        }
     }
 }

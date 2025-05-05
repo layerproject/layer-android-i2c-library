@@ -64,6 +64,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @return Map containing the spectral channel values
      */
+    @Synchronized
     fun readAllChannels(): Map<String, Int> {
         // Enable power
         togglePower(true)
@@ -122,14 +123,25 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * Checks if sensor data is ready to be read.
      */
     private fun getIsDataReady(): Boolean {
-        val status = I2cNative.readWord(fileDescriptor, REG_STATUS2)
-        Log.d(TAG, "Status read: $status")
-        return status and (1 shl BIT_AVALID) != 0
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // We must ensure we're switched to the right device before any I/O
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before getIsDataReady")
+                return false
+            }
+            
+            val status = I2cNative.readWord(fileDescriptor, REG_STATUS2)
+            Log.d(TAG, "Status read: $status")
+            return status and (1 shl BIT_AVALID) != 0
+        }
     }
 
     /**
      * Reads the first set of spectral data channels (F1-F4).
      */
+    @Synchronized
     private fun readSpectralDataOne(): MutableMap<String, Int> {
         val channelData = mutableMapOf<String, Int>()
         channelData["F1"] = readChannel(0)
@@ -142,6 +154,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Reads the second set of spectral data channels (F5-F8, Clear, NIR).
      */
+    @Synchronized
     private fun readSpectralDataTwo(): MutableMap<String, Int> {
         val channelData = mutableMapOf<String, Int>()
         channelData["F5"] = readChannel(0)
@@ -160,6 +173,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param channel Channel number (0-5)
      * @return Channel value as a 16-bit integer
      */
+    @Synchronized
     private fun readChannel(channel: Int): Int {
         val dataLReg = REG_CH0_LOW + (channel * 2)
         val dataHReg = dataLReg + 1
@@ -172,6 +186,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Enables or disables the SMUX (Sensor Mux) functionality.
      */
+    @Synchronized
     private fun enableSMUX(on: Boolean) {
         enableBit(REG_ENABLE, BIT_SMUXEN, on)
     }
@@ -182,6 +197,7 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @param fd File descriptor for the I2C connection
      * @param f1Tof4 True to read F1-F4, false to read F5-F8
      */
+    @Synchronized
     private fun setSMUXLowChannels(f1Tof4: Boolean) {
         enableSpectralMeasurement(false)
         setSMUXCommand(0x10) // Write SMUX configuration from RAM to SMUX chain
@@ -198,25 +214,46 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     /**
      * Sets the SMUX command.
      */
+    @Synchronized
     private fun setSMUXCommand(command: Int) {
-        val smuxCommand = I2cNative.writeByte(fileDescriptor, REG_CFG6, command)
-        Log.d(TAG, "SMUX command result: $smuxCommand")
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // We must ensure we're switched to the right device before any I/O
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before setSMUXCommand")
+                return
+            }
+            
+            val smuxCommand = I2cNative.writeByte(fileDescriptor, REG_CFG6, command)
+            Log.d(TAG, "SMUX command result: $smuxCommand")
+        }
     }
 
     /**
      * Sets up sensor configuration for F1-F4 channels.
      */
     private fun setupF1F4ClearNIR() {
-        val registerValues = mapOf(
-            0x00 to 0x30, 0x01 to 0x01, 0x02 to 0x00, 0x03 to 0x00,
-            0x04 to 0x00, 0x05 to 0x42, 0x06 to 0x00, 0x07 to 0x00,
-            0x08 to 0x50, 0x09 to 0x00, 0x0a to 0x00, 0x0b to 0x00,
-            0x0c to 0x20, 0x0d to 0x04, 0x0e to 0x00, 0x0f to 0x30,
-            0x10 to 0x01, 0x11 to 0x50, 0x12 to 0x00, 0x13 to 0x06
-        )
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // We must ensure we're switched to the right device before any I/O
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before setupF1F4ClearNIR")
+                return
+            }
+            
+            val registerValues = mapOf(
+                0x00 to 0x30, 0x01 to 0x01, 0x02 to 0x00, 0x03 to 0x00,
+                0x04 to 0x00, 0x05 to 0x42, 0x06 to 0x00, 0x07 to 0x00,
+                0x08 to 0x50, 0x09 to 0x00, 0x0a to 0x00, 0x0b to 0x00,
+                0x0c to 0x20, 0x0d to 0x04, 0x0e to 0x00, 0x0f to 0x30,
+                0x10 to 0x01, 0x11 to 0x50, 0x12 to 0x00, 0x13 to 0x06
+            )
 
-        registerValues.forEach { (register, value) ->
-            I2cNative.writeByte(fileDescriptor, register, value)
+            registerValues.forEach { (register, value) ->
+                I2cNative.writeByte(fileDescriptor, register, value)
+            }
         }
     }
 
@@ -224,16 +261,26 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
      * Sets up sensor configuration for F5-F8 channels plus Clear and NIR.
      */
     private fun setupF5F8ClearNIR() {
-        val registerValues = mapOf(
-            0x00 to 0x00, 0x01 to 0x00, 0x02 to 0x00, 0x03 to 0x40,
-            0x04 to 0x02, 0x05 to 0x00, 0x06 to 0x10, 0x07 to 0x03,
-            0x08 to 0x50, 0x09 to 0x10, 0x0a to 0x03, 0x0b to 0x00,
-            0x0c to 0x00, 0x0d to 0x00, 0x0e to 0x24, 0x0f to 0x00,
-            0x10 to 0x00, 0x11 to 0x50, 0x12 to 0x00, 0x13 to 0x06
-        )
+        val lock = fdLock ?: this
+        
+        synchronized(lock) {
+            // We must ensure we're switched to the right device before any I/O
+            if (!switchToDevice()) {
+                Log.e(TAG, "Failed to switch device before setupF5F8ClearNIR")
+                return
+            }
+            
+            val registerValues = mapOf(
+                0x00 to 0x00, 0x01 to 0x00, 0x02 to 0x00, 0x03 to 0x40,
+                0x04 to 0x02, 0x05 to 0x00, 0x06 to 0x10, 0x07 to 0x03,
+                0x08 to 0x50, 0x09 to 0x10, 0x0a to 0x03, 0x0b to 0x00,
+                0x0c to 0x00, 0x0d to 0x00, 0x0e to 0x24, 0x0f to 0x00,
+                0x10 to 0x00, 0x11 to 0x50, 0x12 to 0x00, 0x13 to 0x06
+            )
 
-        registerValues.forEach { (register, value) ->
-            I2cNative.writeByte(fileDescriptor, register, value)
+            registerValues.forEach { (register, value) ->
+                I2cNative.writeByte(fileDescriptor, register, value)
+            }
         }
     }
 
