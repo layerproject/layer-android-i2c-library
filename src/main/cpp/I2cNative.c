@@ -21,6 +21,18 @@ static inline __s32 i2c_smbus_access(int file, char read_write, __u8 command
     return ioctl(file, I2C_SMBUS, &args);
 }
 
+/**
+ * Switches the I2C device on an already open file descriptor
+ * This allows multiple devices to share the same I2C bus
+ */
+static inline int switch_i2c_device(int fd, __u8 deviceAddress)
+{
+    if (fd < 0) {
+        return -1;
+    }
+    return ioctl(fd, I2C_SLAVE, deviceAddress);
+}
+
 static inline __s32 i2c_smbus_read_i2c_block_data(int file, __u8 command,
                                                   __u8 length, __u8 *values)
 {
@@ -80,6 +92,27 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_openBus
         return -1;
     } else {
         return fd;
+    }
+}
+
+/**
+ * Switches the I2C device address for an already open file descriptor.
+ * This allows multiple devices to share the same I2C bus.
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_switchDeviceAddress
+        (JNIEnv *env, jclass jcl, jint fd, jint deviceAddress)
+{
+    __u8 devAddr = deviceAddress & 0xFF;
+    
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "Switching I2C device address to 0x%02X on FD: %d", devAddr, fd);
+    closelog();
+    
+    int result = switch_i2c_device(fd, devAddr);
+    if (result < 0) {
+        return -1;
+    } else {
+        return 0;
     }
 }
 
@@ -144,7 +177,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
     // Create a local buffer for reading
     __u8 buffer[32] = {0};
     
-    // Read data directly from the I2C device without specifying address
+    // Read data directly from the I2C device
     // This is for reading after a command has been sent
     int bytesRead = read(fd, buffer, length);
 

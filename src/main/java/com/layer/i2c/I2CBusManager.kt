@@ -55,6 +55,9 @@ class I2CBusManager private constructor() {
             // Initialize address set for this bus
             addressMap[busPath] = mutableSetOf(address)
             
+            // Register this device as the current device on this fd
+            I2CSensor.setCurrentDevice(fd, address)
+            
             Log.d(TAG, "Opened I2C bus $busPath for address 0x${address.toString(16)}, fd=$fd")
         } else {
             // Bus already open, increment reference count
@@ -92,6 +95,10 @@ class I2CBusManager private constructor() {
             busMap.remove(busPath)
             referenceCountMap.remove(busPath)
             addressMap.remove(busPath)
+            
+            // Clean up the current device tracking in I2CSensor
+            I2CSensor.clearDeviceMapping(fd)
+            
             Log.d(TAG, "Closed I2C bus $busPath (fd=$fd), no more references")
         } else {
             // Decrement reference count

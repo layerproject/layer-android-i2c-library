@@ -63,7 +63,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.layer"
                 artifactId = "i2c"
-                version = "1.0.5"
+                version = "1.0.6"
                 
                 pom {
                     name.set("Layer I2C Library")

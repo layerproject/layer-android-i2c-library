@@ -88,4 +88,14 @@ public class I2cNative {
      * @return result of operation. Zero is OK, everything less than a zero means there was an error.
      */
     public static native int write(int fd, int value);
+    
+    /**
+     * Switches the I2C device address for an already open file descriptor.
+     * This allows multiple devices to share the same I2C bus.
+     *
+     * @param fd            file descriptor of i2c bus
+     * @param deviceAddress address of the I2C device to switch to
+     * @return 0 if successful, -1 if error
+     */
+    public static native int switchDeviceAddress(int fd, int deviceAddress);
 }

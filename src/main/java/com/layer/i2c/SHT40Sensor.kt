@@ -87,10 +87,16 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
 
     @Synchronized
     private fun softReset(): Boolean {
+        if (!switchToDevice(fileDescriptor)) {
+            Log.e(TAG, "Failed switching to device ahead of sending command")
+            return false
+        }
+
         val writeResult = I2cNative.write(fileDescriptor, 0x94)
         Log.d(TAG, "Soft reset command result on SHT40: $writeResult")
 
-        Thread.sleep(1000)
+        Thread.sleep(100)
+        // SHT40 needs about 100ms to soft reset
 
         return writeResult == 1
     }
@@ -99,19 +105,23 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
      */
     @Synchronized
     private fun readMeasurement() {
+        if (!switchToDevice(fileDescriptor)) {
+            Log.e(TAG, "Failed switching to device ahead of writing command and reading result")
+            temperature = DEFAULT_TEMPERATURE
+            humidity = DEFAULT_HUMIDITY
+        }
+
         try {
             // Send measurement command (single shot, high precision)
             val writeResult = I2cNative.write(fileDescriptor, CMD_MEASURE_HIGH_PRECISION)
-            Log.d(TAG, "Measure high precision command result on SHT40: $writeResult")
+            Log.d(TAG, "Measure temperature and humidity with high precision on SHT40: $writeResult")
             
-            // SHT40 needs about 20ms to complete the measurement
-            Thread.sleep(1000)
+            // SHT40 needs about 100ms to complete the measurement
+            Thread.sleep(100)
             
             // Read 6 bytes: 2 for temperature, 1 CRC, 2 for humidity, 1 CRC
             val buffer = ByteArray(6)
             val bytesRead = I2cNative.readRawBytes(fileDescriptor, buffer, 6)
-
-            Log.d(TAG, "Bytes read on SHT40: $bytesRead")
 
             if (bytesRead == 6) {
                 // Extract temperature (first 2 bytes)
@@ -201,28 +211,4 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
             return mapOf("ERROR" to 65535)
         }
     }
-    
-    /**
-     * Get the current temperature in Celsius
-     */
-    fun getTemperature(): Double {
-        if (temperature == DEFAULT_TEMPERATURE) {
-            // Try to get a fresh reading
-            readMeasurement()
-        }
-        return temperature
-    }
-    
-    /**
-     * Get the current relative humidity (0-100%)
-     */
-    fun getHumidity(): Double {
-        if (humidity == DEFAULT_HUMIDITY) {
-            // Try to get a fresh reading
-            readMeasurement()
-        }
-        return humidity
-    }
-    
-    // The isReady() method from the parent class is used to check if the sensor is ready
 }

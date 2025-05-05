@@ -60,6 +60,14 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
 
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
         (JNIEnv *env, jclass jcl, jint fd, jint value);
+        
+/*
+ * Class:     com_layer_i2c_I2cNative
+ * Method:    switchDeviceAddress
+ * Signature: (II)I
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_switchDeviceAddress
+        (JNIEnv *, jclass, jint, jint);
 
 #ifdef __cplusplus
 }

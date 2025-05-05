@@ -10,6 +10,27 @@ import java.io.IOException
 abstract class I2CSensor(protected val busPath: String) {
     companion object {
         protected const val TAG = "I2CSensor"
+        
+        // Map to track the current device address for each file descriptor
+        private val currentDeviceMap = HashMap<Int, Int>()
+        
+        // Set the current device for a file descriptor
+        @Synchronized
+        fun setCurrentDevice(fd: Int, deviceAddress: Int) {
+            currentDeviceMap[fd] = deviceAddress
+        }
+        
+        // Get the current device for a file descriptor
+        @Synchronized
+        fun getCurrentDevice(fd: Int): Int {
+            return currentDeviceMap[fd] ?: -1
+        }
+        
+        // Clear the device mapping for a file descriptor
+        @Synchronized
+        fun clearDeviceMapping(fd: Int) {
+            currentDeviceMap.remove(fd)
+        }
     }
     
     // Reference to the bus manager
@@ -76,6 +97,11 @@ abstract class I2CSensor(protected val busPath: String) {
      */
     protected fun closeDevice() {
         if (isBusOpen) {
+            val fd = fileDescriptor
+            
+            // Clean up any locks before closing
+            cleanUpFdResources(fd)
+            
             busManager.closeBus(busPath, sensorAddress)
             isBusOpen = false
         }
@@ -144,13 +170,51 @@ abstract class I2CSensor(protected val busPath: String) {
             Log.d(TAG, "Sensor on $busPath already disconnected.")
         }
     }
+    
+
+    /**
+     * Switches the I2C bus to this device's address only if needed.
+     * This must be called before any I/O operations when multiple devices
+     * share the same I2C bus/file descriptor.
+     * 
+     * @param fd File descriptor to use
+     * @return true if the switch was successful, false otherwise
+     */
+    protected fun switchToDevice(fd: Int): Boolean {
+        if (fd < 0) {
+            Log.e(TAG, "Invalid file descriptor: $fd")
+            return false
+        }
+        
+        // Check if we're already addressing the correct device
+        val currentDevice = getCurrentDevice(fd)
+        if (currentDevice == sensorAddress) {
+            // Already switched to this device, no need to switch again
+            return true
+        }
+        
+        // We need to switch device
+        val result = I2cNative.switchDeviceAddress(fd, sensorAddress)
+        if (result < 0) {
+            Log.e(TAG, "Failed to switch to device address 0x${sensorAddress.toString(16)} on fd=$fd")
+            return false
+        }
+        
+        // Update our tracking of the current device
+        setCurrentDevice(fd, sensorAddress)
+        return true
+    }
 
     // --- I2C Primitive Helpers ---
     
-    @Synchronized
     protected fun readByteReg(fd: Int, register: Int): Int {
         if (fd < 0) {
             throw IOException("Invalid file descriptor")
+        }
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
         }
         
         val result = I2cNative.readWord(fd, register)
@@ -167,10 +231,14 @@ abstract class I2CSensor(protected val busPath: String) {
         return readByteReg(fileDescriptor, register)
     }
 
-    @Synchronized
     protected fun writeByteReg(fd: Int, register: Int, value: Int) {
         if (fd < 0) {
             throw IOException("Invalid file descriptor")
+        }
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
         }
         
         val result = I2cNative.writeByte(fd, register, value)
@@ -186,13 +254,29 @@ abstract class I2CSensor(protected val busPath: String) {
         writeByteReg(fileDescriptor, register, value)
     }
 
-    @Synchronized
     protected fun writeWordReg(fd: Int, lsbRegister: Int, value: Int) {
+        if (fd < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+        }
+        
         val lsb = value and 0xFF
         val msb = (value shr 8) and 0xFF
-        // Write LSB first, then MSB
-        writeByteReg(fd, lsbRegister, lsb)
-        writeByteReg(fd, lsbRegister + 1, msb)
+        
+        // Write LSB first, then MSB - no need to switch device again
+        val result1 = I2cNative.writeByte(fd, lsbRegister, lsb)
+        if (result1 < 0) {
+            throw IOException("I2C Write LSB Error on fd=$fd, reg=0x${lsbRegister.toString(16)}, value=0x${lsb.toString(16)}, code=$result1")
+        }
+        
+        val result2 = I2cNative.writeByte(fd, lsbRegister + 1, msb)
+        if (result2 < 0) {
+            throw IOException("I2C Write MSB Error on fd=$fd, reg=0x${(lsbRegister + 1).toString(16)}, value=0x${msb.toString(16)}, code=$result2")
+        }
     }
 
     protected fun writeWordReg(lsbRegister: Int, value: Int) {
@@ -202,12 +286,19 @@ abstract class I2CSensor(protected val busPath: String) {
         writeWordReg(fileDescriptor, lsbRegister, value)
     }
     
-    @Synchronized
     protected fun readDataBlock(data: ByteArray, length: Int): Int {
         if (!isReady()) {
             throw IOException("Not connected to I2C device")
         }
-        return I2cNative.readRawBytes(fileDescriptor, data, length)
+        
+        val fd = fileDescriptor
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+        }
+        
+        return I2cNative.readRawBytes(fd, data, length)
     }
     
     protected fun enableBit(register: Int, bit: Int, on: Boolean) {
@@ -217,22 +308,48 @@ abstract class I2CSensor(protected val busPath: String) {
         enableBit(fileDescriptor, register, bit, on)
     }
 
-    @Synchronized
     protected fun enableBit(fd: Int, register: Int, bit: Int, on: Boolean) {
+        if (fd < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+        }
+        
+        // Read current value (already performs device switching)
         val regValue = readByteReg(fd, register)
         val bitMask = (1 shl bit)
         val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
+        
         if (newValue != regValue) {
-            writeByteReg(fd, register, newValue)
+            val result = I2cNative.writeByte(fd, register, newValue)
+            if (result < 0) {
+                throw IOException("I2C Write Error on fd=$fd, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+            }
         }
     }
 
-    @Synchronized
     protected fun setRegisterBits(fd: Int, register: Int, shift: Int, width: Int, value: Int) {
-        var regValue = readByteReg(fd, register)
+        if (fd < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // Switch to this device before performing I/O
+        if (!switchToDevice(fd)) {
+            throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+        }
+        
+        // Read current value
+        val regValue = readByteReg(fd, register)
         val mask = ((1 shl width) - 1) shl shift
-        regValue = (regValue and mask.inv()) or ((value shl shift) and mask)
-        writeByteReg(fd, register, regValue)
+        val newValue = (regValue and mask.inv()) or ((value shl shift) and mask)
+        
+        val result = I2cNative.writeByte(fd, register, newValue)
+        if (result < 0) {
+            throw IOException("I2C Write Error on fd=$fd, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+        }
     }
     
     protected fun setRegisterBits(register: Int, shift: Int, width: Int, value: Int) {
@@ -240,5 +357,15 @@ abstract class I2CSensor(protected val busPath: String) {
             throw IOException("Not connected to I2C device")
         }
         setRegisterBits(fileDescriptor, register, shift, width, value)
+    }
+    
+    /**
+     * Called when disconnecting or closing the device.
+     * Clean up by removing any device mappings for this file descriptor.
+     */
+    protected fun cleanUpFdResources(fd: Int) {
+        if (fd >= 0) {
+            clearDeviceMapping(fd)
+        }
     }
 }
