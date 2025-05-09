@@ -179,7 +179,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             setIntegrationTime(0, 65534)
 
             // Gain: AGAIN (0=0.5x, 9=256x(default), 12=2048x)
-            setGain(9)
+            setGain(10)
 
             Log.d(TAG, "Sensor fd=$fileDescriptor initialized successfully.")
             return true
