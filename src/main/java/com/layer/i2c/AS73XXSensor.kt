@@ -32,6 +32,13 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
     abstract fun readSpectralData(): Map<String, Int>
 
     /**
+     * Attempts to recover the sensor from an unresponsive state.
+     * Subclasses should implement their specific recovery methods.
+     * @return true if recovery was successful, false otherwise
+     */
+    abstract fun recoverSensor(): Boolean
+
+    /**
      * Closes the connection to the sensor and attempts to power it down.
      */
     override fun disconnect() {
@@ -60,6 +67,27 @@ abstract class AS73XXSensor(busPath: String) : I2CSensor(busPath) {
      * @param useBank1 True to select Bank 1, false to select Bank 0
      */
     @Synchronized
+    /**
+     * Direct bank setting that bypasses recovery mechanisms.
+     * Use this method within recovery functions to avoid infinite loops.
+     */
+    protected fun setBankDirect(useBank1: Boolean) {
+        if (fileDescriptor < 0) return
+
+        try {
+            val configWord = readByteRegDirect(REG_CONFIG0)
+            val currentBank = (configWord shr BIT_REGBANK) and 1
+            val targetBank = if (useBank1) 1 else 0
+            
+            if (currentBank != targetBank) {
+                Log.d(TAG, "Setting Register Bank Access to $targetBank on fd=$fileDescriptor")
+                enableBitDirect(REG_CONFIG0, BIT_REGBANK, useBank1)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting bank for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
     protected fun setBank(useBank1: Boolean) {
         if (fileDescriptor < 0) return
 

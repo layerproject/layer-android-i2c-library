@@ -43,6 +43,10 @@ abstract class I2CSensor(protected val busPath: String) {
     // Lock object for file descriptor-level synchronization
     protected var fdLock: Any? = null
     
+    // Flag to prevent recursive recovery attempts
+    @Volatile
+    private var isRecovering = false
+    
     // Each sensor type must specify its own I2C address
     protected abstract val sensorAddress: Int
     
@@ -221,6 +225,33 @@ abstract class I2CSensor(protected val busPath: String) {
 
     // --- I2C Primitive Helpers ---
     
+    /**
+     * Direct I2C read that bypasses recovery mechanisms.
+     * Use this method within recovery functions to avoid infinite loops.
+     */
+    protected fun readByteRegDirect(register: Int): Int {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // Use the shared lock for file descriptor level synchronization
+        val lock = fdLock ?: this
+        synchronized(lock) {
+            // Switch to this device before performing I/O
+            if (!switchToDevice()) {
+                throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+            }
+            
+            val result = I2cNative.readWord(fileDescriptor, register)
+            if (result < 0) {
+                val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+                Log.e(TAG, errorMessage)
+                throw IOException(errorMessage)
+            }
+            return result and 0xFF
+        }
+    }
+    
     protected fun readByteReg(register: Int): Int {
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
@@ -236,7 +267,39 @@ abstract class I2CSensor(protected val busPath: String) {
             
             val result = I2cNative.readWord(fileDescriptor, register)
             if (result < 0) {
-                throw IOException("I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result")
+                val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+                Log.e(TAG, errorMessage)
+                
+                // If this sensor supports recovery (spectral sensors) and we're not already in recovery, attempt it
+                if (this is AS73XXSensor && !isRecovering) {
+                    Log.w(TAG, "Attempting sensor recovery due to I2C read error on fd=$fileDescriptor")
+                    try {
+                        isRecovering = true
+                        val recovered = (this as AS73XXSensor).recoverSensor()
+                        if (recovered) {
+                            Log.i(TAG, "Sensor recovery successful, retrying read operation on fd=$fileDescriptor")
+                            // Retry the read operation once after successful recovery
+                            if (!switchToDevice()) {
+                                throw IOException("Failed to switch to device after recovery 0x${sensorAddress.toString(16)}")
+                            }
+                            val retryResult = I2cNative.readWord(fileDescriptor, register)
+                            if (retryResult >= 0) {
+                                Log.i(TAG, "Read operation successful after recovery on fd=$fileDescriptor")
+                                return retryResult and 0xFF
+                            } else {
+                                Log.e(TAG, "Read operation still failed after recovery on fd=$fileDescriptor")
+                            }
+                        } else {
+                            Log.e(TAG, "Sensor recovery failed on fd=$fileDescriptor")
+                        }
+                    } catch (recoveryException: Exception) {
+                        Log.e(TAG, "Exception during sensor recovery on fd=$fileDescriptor: ${recoveryException.message}")
+                    } finally {
+                        isRecovering = false
+                    }
+                }
+                
+                throw IOException(errorMessage)
             }
             return result and 0xFF
         }
@@ -305,6 +368,43 @@ abstract class I2CSensor(protected val busPath: String) {
             }
             
             return I2cNative.readRawBytes(fileDescriptor, data, length)
+        }
+    }
+    
+    /**
+     * Direct bit enable that bypasses recovery mechanisms.
+     * Use this method within recovery functions to avoid infinite loops.
+     */
+    protected fun enableBitDirect(register: Int, bit: Int, on: Boolean) {
+        if (!isReady()) {
+            throw IOException("Not connected to I2C device")
+        }
+
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+
+        // Use the shared lock for file descriptor level synchronization
+        val lock = fdLock ?: this
+        synchronized(lock) {
+            // Switch to this device before performing I/O
+            if (!switchToDevice()) {
+                throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+            }
+
+            // Read current value using direct method (already performs device switching)
+            val regValue = readByteRegDirect(register)
+            val bitMask = (1 shl bit)
+            val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
+
+            if (newValue != regValue) {
+                val result = I2cNative.writeByte(fileDescriptor, register, newValue)
+                if (result < 0) {
+                    val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result"
+                    Log.e(TAG, errorMessage)
+                    throw IOException(errorMessage)
+                }
+            }
         }
     }
     

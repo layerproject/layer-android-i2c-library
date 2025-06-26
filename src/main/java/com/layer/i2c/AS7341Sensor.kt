@@ -40,7 +40,57 @@ class AS7341Sensor(busPath: String) : AS73XXSensor(busPath) {
     }
 
     override fun isCorrectSensor(): Boolean {
-        return (readID() == 36)
+        if (!isReady()) {
+            return false
+        }
+        
+        try {
+            // Try to read ID register - AS7341 should return 36
+            val id = readID()
+            Log.d(TAG, "Reading AS7341 sensor ID: $id (expected: 36)")
+            return id == 36
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading AS7341 sensor ID: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * AS7341 basic recovery - just tries power cycling
+     * @return true if recovery was successful, false otherwise
+     */
+    override fun recoverSensor(): Boolean {
+        if (fileDescriptor < 0) {
+            Log.e(TAG, "Cannot recover AS7341 sensor: invalid file descriptor")
+            return false
+        }
+
+        Log.w(TAG, "Attempting AS7341 sensor recovery on fd=$fileDescriptor")
+
+        try {
+            // Try power cycle
+            togglePower(false)
+            Thread.sleep(10) // Wait for power down
+            togglePower(true)
+            Thread.sleep(5)  // Wait for power up
+            
+            // Verify sensor is responsive
+            if (isCorrectSensor()) {
+                Log.i(TAG, "AS7341 sensor recovered using power cycle on fd=$fileDescriptor")
+                if (initializeSensor()) {
+                    Log.i(TAG, "AS7341 sensor re-initialized successfully after recovery on fd=$fileDescriptor")
+                    return true
+                } else {
+                    Log.e(TAG, "Failed to re-initialize AS7341 sensor after recovery on fd=$fileDescriptor")
+                    return false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during AS7341 sensor recovery on fd=$fileDescriptor: ${e.message}", e)
+        }
+
+        Log.e(TAG, "AS7341 sensor recovery failed on fd=$fileDescriptor")
+        return false
     }
     
     /**

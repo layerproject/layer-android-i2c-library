@@ -1,6 +1,6 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
     id("maven-publish")
 }
 
@@ -51,9 +51,9 @@ android {
 }
 
 dependencies {
-    implementation(libs.core.ktx)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.test.ext.junit)
+    implementation("androidx.core:core-ktx:1.13.1")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
 
 afterEvaluate {
@@ -63,7 +63,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.layer"
                 artifactId = "i2c"
-                version = "1.0.8"
+                version = "1.0.9"
                 
                 pom {
                     name.set("Layer I2C Library")
