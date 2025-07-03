@@ -56,12 +56,6 @@ abstract class I2CSensor(protected val busPath: String) {
      */
     protected abstract fun initializeSensor(): Boolean
     
-    /**
-     * Checks if the sensor has the expected identity
-     * Used to verify that the connected device is the expected sensor type
-     * @return true if this is the expected sensor, false otherwise
-     */
-    abstract fun isCorrectSensor(): Boolean
     
     /**
      * Checks if the sensor is connected *and* initialized.
@@ -271,11 +265,11 @@ abstract class I2CSensor(protected val busPath: String) {
                 Log.e(TAG, errorMessage)
                 
                 // If this sensor supports recovery (spectral sensors) and we're not already in recovery, attempt it
-                if (this is AS73XXSensor && !isRecovering) {
+                if (this is AS7343Sensor && !isRecovering) {
                     Log.w(TAG, "Attempting sensor recovery due to I2C read error on fd=$fileDescriptor")
                     try {
                         isRecovering = true
-                        val recovered = (this as AS73XXSensor).recoverSensor()
+                        val recovered = (this as AS7343Sensor).recoverSensor()
                         if (recovered) {
                             Log.i(TAG, "Sensor recovery successful, retrying read operation on fd=$fileDescriptor")
                             // Retry the read operation once after successful recovery
@@ -376,12 +370,16 @@ abstract class I2CSensor(protected val busPath: String) {
      * Use this method within recovery functions to avoid infinite loops.
      */
     protected fun enableBitDirect(register: Int, bit: Int, on: Boolean) {
-        if (!isReady()) {
-            throw IOException("Not connected to I2C device")
-        }
-
         if (fileDescriptor < 0) {
-            throw IOException("Invalid file descriptor")
+            throw IOException("I2C device not connected: invalid file descriptor")
+        }
+        
+        if (!isBusOpen) {
+            throw IOException("I2C device not connected: bus not open")
+        }
+        
+        if (!isInitialized) {
+            Log.d(TAG, "enableBitDirect called during initialization (fd=$fileDescriptor, reg=0x${register.toString(16)}, bit=$bit)")
         }
 
         // Use the shared lock for file descriptor level synchronization
@@ -409,12 +407,16 @@ abstract class I2CSensor(protected val busPath: String) {
     }
     
     protected fun enableBit(register: Int, bit: Int, on: Boolean) {
-        if (!isReady()) {
-            throw IOException("Not connected to I2C device")
-        }
-
         if (fileDescriptor < 0) {
-            throw IOException("Invalid file descriptor")
+            throw IOException("I2C device not connected: invalid file descriptor")
+        }
+        
+        if (!isBusOpen) {
+            throw IOException("I2C device not connected: bus not open")
+        }
+        
+        if (!isInitialized) {
+            Log.d(TAG, "enableBit called during initialization (fd=$fileDescriptor, reg=0x${register.toString(16)}, bit=$bit)")
         }
 
         // Use the shared lock for file descriptor level synchronization

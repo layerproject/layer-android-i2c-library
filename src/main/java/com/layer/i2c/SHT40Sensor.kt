@@ -32,32 +32,6 @@ class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
     private var temperature: Double = DEFAULT_TEMPERATURE
     private var humidity: Double = DEFAULT_HUMIDITY
     
-    /**
-     * Check if this is the correct SHT40 sensor by attempting to communicate with it.
-     * SHT40 sensors don't have an ID register, so we try to reset and read a measurement.
-     */
-    override fun isCorrectSensor(): Boolean {
-        if (!isReady()) {
-            return false
-        }
-        
-        return try {
-            // Then attempt to read a measurement using transaction-based approach
-            val result = readData()
-            
-            // If we got valid data (not error), it's the correct sensor
-            if (result.containsKey("ERROR")) {
-                Log.d(TAG, "Failed to identify SHT40 sensor, got error reading data")
-                false
-            } else {
-                Log.d(TAG, "SHT40 sensor identified successfully")
-                true
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking if SHT40 sensor is present: ${e.message}")
-            false
-        }
-    }
     
     /**
      * Initialize the SHT40 sensor

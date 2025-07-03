@@ -100,9 +100,9 @@ sensor2.disconnect()
 
 ## API Documentation
 
-### AS73XXSensor (Abstract Base Class)
+### AS7343Sensor
 
-Common base class for all spectral sensors.
+High-level interface for the AS7343 spectral sensor.
 
 - `connect()`: Opens a connection to the sensor and initializes it
 - `disconnect()`: Closes the connection and powers down the sensor
@@ -115,7 +115,6 @@ High-level interface for the AS7341 spectral sensor.
 
 - `readSpectralData()`: Reads all spectral channels (F1-F8, Clear, NIR)
 - `readAllChannels()`: Reads all spectral channels with given file descriptor
-- `isCorrectSensor()`: Validates if the connected device is an AS7341
 
 ### AS7343Sensor
 

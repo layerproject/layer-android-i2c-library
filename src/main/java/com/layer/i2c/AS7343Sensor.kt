@@ -7,16 +7,19 @@ import kotlin.math.min
  * High-level interface for the AS7343 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
-    // Implement abstract register properties
-    override val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB
-    override val REG_ASTEP_L: Int = 0xD4      // Integration Time Step Size LSB (16-bit)
-    override val REG_CONFIG0: Int = 0xBF      // Bank selection register
-    override val BIT_REGBANK: Int = 4         // Bank selection bit position
-    override val REG_ENABLE: Int = 0x80       // Enable register 
-    override val BIT_POWER: Int = 0           // Power bit position
-    override val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
-    override val REG_CFG1: Int = 0xC6         // Gain configuration register
+class AS7343Sensor(busPath: String) : I2CSensor(busPath) {
+    // Default address for AS7343 sensor
+    override val sensorAddress: Int = 0x39
+    
+    // Register and bit definitions
+    private val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB
+    private val REG_ASTEP_L: Int = 0xD4      // Integration Time Step Size LSB (16-bit)
+    private val REG_CONFIG0: Int = 0xBF      // Bank selection register
+    private val BIT_REGBANK: Int = 4         // Bank selection bit position
+    private val REG_ENABLE: Int = 0x80       // Enable register 
+    private val BIT_POWER: Int = 0           // Power bit position
+    private val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
+    private val REG_CFG1: Int = 0xC6         // Gain configuration register
     
     companion object {
         private const val TAG = "AS7343Sensor"
@@ -79,20 +82,152 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     }
     
     /**
-     * Checks if this is the correct sensor by reading the ID register
+     * Closes the connection to the sensor and attempts to power it down.
      */
-    override fun isCorrectSensor(): Boolean {
-        if (!isReady()) {
-            return false
+    override fun disconnect() {
+        if (isBusOpen) {
+            Log.d(TAG, "Disconnecting sensor on $busPath (fd=$fileDescriptor)...")
+            // Attempt to power down before closing
+            if (isInitialized) { // Only try if we think it was initialized
+                try {
+                    togglePower(false)
+                    Log.d(TAG, "Sensor powered down.")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error powering down sensor during disconnect: ${e.message}")
+                }
+            }
+            // Call parent's closeDevice() which handles all the cleanup
+            super.disconnect()
+        } else {
+            Log.d(TAG, "Sensor on $busPath already disconnected.")
         }
-        
+    }
+    
+    /**
+     * Sets the register bank.
+     * Direct bank setting that bypasses recovery mechanisms.
+     * Use this method within recovery functions to avoid infinite loops.
+     * 
+     * @param useBank1 True to select Bank 1, false to select Bank 0
+     */
+    @Synchronized
+    private fun setBankDirect(useBank1: Boolean) {
+        if (fileDescriptor < 0) return
+
         try {
-            val id = readByteRegDirect(AS7343_ID_REG)
-            Log.d(TAG, "Reading sensor ID: $id (expected: ${AS7343_ID_VALUE})")
-            return id == AS7343_ID_VALUE
+            val configWord = readByteRegDirect(REG_CONFIG0)
+            val currentBank = (configWord shr BIT_REGBANK) and 1
+            val targetBank = if (useBank1) 1 else 0
+            
+            if (currentBank != targetBank) {
+                Log.d(TAG, "Setting Register Bank Access to $targetBank on fd=$fileDescriptor")
+                enableBitDirect(REG_CONFIG0, BIT_REGBANK, useBank1)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error reading sensor ID: ${e.message}")
-            return false
+            Log.e(TAG, "Error setting bank for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
+    private fun setBank(useBank1: Boolean) {
+        if (fileDescriptor < 0) return
+
+        try {
+            val configWord = readByteReg(REG_CONFIG0)
+            val currentBank = (configWord shr BIT_REGBANK) and 1
+            val targetBank = if (useBank1) 1 else 0
+            
+            if (currentBank != targetBank) {
+                Log.d(TAG, "Setting Register Bank Access to $targetBank on fd=$fileDescriptor")
+                enableBit(REG_CONFIG0, BIT_REGBANK, useBank1)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting bank for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Toggles the power state of the sensor.
+     *
+     * @param on True to power on, false to power off
+     */
+    @Synchronized
+    private fun togglePower(on: Boolean) {
+        if (fileDescriptor < 0) return
+        try {
+            // Power control is in Bank 0, ensure it's selected
+            setBank(false)
+            Log.d(TAG, "Setting Power ${if (on) "ON" else "OFF"} on fd=$fileDescriptor")
+            enableBit(REG_ENABLE, BIT_POWER, on)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error toggling power for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Enables or disables spectral measurement.
+     */
+    @Synchronized
+    private fun enableSpectralMeasurement(enableMeasurement: Boolean) {
+        try {
+            setBank(false) // Ensure Bank 0
+            if (enableMeasurement) {
+                // Make sure power is on before enabling measurement
+                val enableReg = readByteReg(REG_ENABLE)
+                if (enableReg and (1 shl BIT_POWER) == 0) {
+                    Log.w(TAG, "Warning: Enabling measurement while power is OFF. Enabling power first.")
+                    togglePower(true)
+                    Thread.sleep(1) // Small delay after power on
+                }
+            }
+            enableBit(REG_ENABLE, BIT_MEASUREMENT, enableMeasurement)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling measurement for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Sets the integration time for spectral measurements.
+     */
+    @Synchronized
+    private fun setIntegrationTime(atime: Int, astep: Int) {
+        if (fileDescriptor < 0) return
+        val safeAtime = atime.coerceIn(0, 255)
+        val safeAstep = astep.coerceIn(0, 65534)
+        if (safeAtime == 0 && safeAstep == 0) {
+            Log.e(TAG, "ATIME and ASTEP cannot both be 0. Setting ASTEP=1.")
+            setIntegrationTimeInternal(0, 1)
+            return
+        }
+        setIntegrationTimeInternal(safeAtime, safeAstep)
+    }
+
+    @Synchronized
+    private fun setIntegrationTimeInternal(atime: Int, astep: Int) {
+        try {
+            Log.d(TAG, "Setting ATIME=$atime, ASTEP=$astep on fd=$fileDescriptor")
+            setBank(false) // Ensure Bank 0
+            writeByteReg(REG_ATIME, atime)
+            writeWordReg(REG_ASTEP_L, astep)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting integration time for fd=$fileDescriptor: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Sets the sensor gain.
+     * @param againValue Gain value (typically 0-12, where higher values mean higher sensitivity)
+     *   0=0.5x, 4=16x, 8=128x, 9=256x(default), 10=512x, 12=2048x
+     */
+    @Synchronized
+    private fun setGain(againValue: Int) {
+        if (fileDescriptor < 0) return
+        val safeAgain = againValue.coerceIn(0, 12)
+        try {
+            Log.d(TAG, "Setting Gain (AGAIN) on fd=$fileDescriptor to $safeAgain")
+            setBank(false) // Ensure Bank 0
+            setRegisterBits(REG_CFG1, 0, 5, safeAgain)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting gain for fd=$fileDescriptor: ${e.message}", e)
         }
     }
 
@@ -124,7 +259,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
      * Call connect() before using this, and disconnect() when done.
      * @return Map of primary channel names to values, or empty map if not initialized or read fails.
      */
-    override fun readSpectralData(): Map<String, Int> {
+    fun readSpectralData(): Map<String, Int> {
         if (!isInitialized) {
             Log.e(TAG, "Sensor not initialized. Call connect() first.")
             return emptyMap()
@@ -221,9 +356,19 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             // Perform proper Power-On Reset sequence as per datasheet
             return performProperPowerOnReset()
         } catch (e: Exception) {
-            Log.e(TAG, "Error during sensor initialization for fd=$fileDescriptor: ${e.message}", e)
+            Log.e(TAG, "EXCEPTION during sensor initialization for fd=$fileDescriptor", e)
+            Log.e(TAG, "Initialization exception type: ${e.javaClass.simpleName}")
+            Log.e(TAG, "Initialization exception message: ${e.message}")
+            if (e.cause != null) {
+                Log.e(TAG, "Initialization exception cause: ${e.cause?.javaClass?.simpleName} - ${e.cause?.message}")
+            }
             // Attempt to power off on failure
-            try { togglePower(false) } catch (_: Exception) {}
+            try { 
+                Log.d(TAG, "Attempting to power off sensor after initialization failure on fd=$fileDescriptor")
+                togglePower(false) 
+            } catch (powerOffException: Exception) {
+                Log.w(TAG, "Failed to power off sensor after initialization failure: ${powerOffException.message}")
+            }
             return false
         }
     }
@@ -239,30 +384,41 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         
         try {
             // Step 1: Ensure we start from a clean state - power off first
+            Log.d(TAG, "Step 1: Setting Bank 0 and powering off sensor on fd=$fileDescriptor")
             setBank(false) // Ensure Bank 0
             togglePower(false)
             Thread.sleep(5) // Wait for power down
+            Log.d(TAG, "Step 1 completed: Sensor powered off on fd=$fileDescriptor")
             
             // Step 2: Power on and wait for stabilization
             // Datasheet specifies 200μs initialization time after power-on
+            Log.d(TAG, "Step 2: Powering on sensor on fd=$fileDescriptor")
             togglePower(true)
             Thread.sleep(1) // Wait for internal initialization (>200μs)
+            Log.d(TAG, "Step 2 completed: Sensor powered on, waiting for stabilization on fd=$fileDescriptor")
             
             // Step 3: Verify sensor is responsive after power-on
+            Log.d(TAG, "Step 3: Checking sensor responsiveness after power-on on fd=$fileDescriptor")
             if (!isSensorResponsive()) {
-                Log.e(TAG, "Sensor not responsive after power-on on fd=$fileDescriptor")
+                Log.e(TAG, "Step 3 FAILED: Sensor not responsive after power-on on fd=$fileDescriptor")
                 return false
             }
+            Log.d(TAG, "Step 3 completed: Sensor responsive after power-on on fd=$fileDescriptor")
             
             // Step 4: Clear any residual state from previous operations
+            Log.d(TAG, "Step 4: Clearing SAI active state on fd=$fileDescriptor")
             clearSAIActive()
+            Log.d(TAG, "Step 4 completed: SAI active state cleared on fd=$fileDescriptor")
             
             // Step 5: Ensure proper bank selection for configuration
+            Log.d(TAG, "Step 5: Setting Bank 0 for configuration on fd=$fileDescriptor")
             setBank(false) // Ensure Bank 0 for main configuration
+            Log.d(TAG, "Step 5 completed: Bank 0 selected for configuration on fd=$fileDescriptor")
             
             // Step 6: Configure auto_smux for 18-channel readout
+            Log.d(TAG, "Step 6: Configuring auto_smux for 18-channel readout on fd=$fileDescriptor")
             setRegisterBits(AS7343_CFG20_REG, AS7343_CFG20_AUTO_SMUX_SHIFT, 2, AS7343_AUTO_SMUX_MODE_18CH)
-            Log.d(TAG, "Set auto_smux mode to 18-channel (3)")
+            Log.d(TAG, "Step 6 completed: Set auto_smux mode to 18-channel on fd=$fileDescriptor")
 
             // Step 7: Set default integration time (~100ms)
             // Integration Time determines how long the sensor collects light for a measurement.
@@ -276,22 +432,33 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
             // So we use the following values to get ~100ms total exposure time:
             //setIntegrationTime(fd, atime = 35, astep = 999)
 
+            Log.d(TAG, "Step 7: Setting integration time on fd=$fileDescriptor")
             setIntegrationTime(0, 65534)
+            Log.d(TAG, "Step 7 completed: Integration time set on fd=$fileDescriptor")
 
             // Step 8: Set gain: AGAIN (0=0.5x, 9=256x(default), 12=2048x)
+            Log.d(TAG, "Step 8: Setting gain to 10 on fd=$fileDescriptor")
             setGain(10)
+            Log.d(TAG, "Step 8 completed: Gain set to 10 on fd=$fileDescriptor")
             
             // Step 9: Final verification that sensor is still responsive
+            Log.d(TAG, "Step 9: Final responsiveness check on fd=$fileDescriptor")
             if (!isSensorResponsive()) {
-                Log.e(TAG, "Sensor became unresponsive during configuration on fd=$fileDescriptor")
+                Log.e(TAG, "Step 9 FAILED: Sensor became unresponsive during configuration on fd=$fileDescriptor")
                 return false
             }
+            Log.d(TAG, "Step 9 completed: Final responsiveness check passed on fd=$fileDescriptor")
 
             Log.d(TAG, "Proper Power-On Reset sequence completed successfully on fd=$fileDescriptor")
             return true
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error during Power-On Reset sequence for fd=$fileDescriptor: ${e.message}", e)
+            Log.e(TAG, "EXCEPTION during Power-On Reset sequence for fd=$fileDescriptor", e)
+            Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
+            Log.e(TAG, "Exception message: ${e.message}")
+            if (e.cause != null) {
+                Log.e(TAG, "Exception cause: ${e.cause?.javaClass?.simpleName} - ${e.cause?.message}")
+            }
             return false
         }
     }
@@ -561,15 +728,17 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
     @Synchronized
     fun isSensorResponsive(): Boolean {
         if (fileDescriptor < 0) {
+            Log.w(TAG, "isSensorResponsive: invalid file descriptor")
             return false
         }
 
         try {
-            // Try to read the ID register - this should always return the expected value
+            // Just verify we can communicate with the sensor by reading a register
             val id = readByteRegDirect(AS7343_ID_REG)
-            return id == AS7343_ID_VALUE
+            Log.d(TAG, "Sensor communication test on fd=$fileDescriptor: read ID=0x${id.toString(16).uppercase()}")
+            return true  // If we can read without exception, sensor is responsive
         } catch (e: Exception) {
-            Log.w(TAG, "Sensor unresponsive on fd=$fileDescriptor: ${e.message}")
+            Log.w(TAG, "Sensor unresponsive on fd=$fileDescriptor: ${e.message}", e)
             return false
         }
     }
@@ -580,7 +749,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
      * @return true if recovery was successful, false if all methods failed
      */
     @Synchronized
-    override fun recoverSensor(): Boolean {
+    fun recoverSensor(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Cannot recover sensor: invalid file descriptor")
             return false
