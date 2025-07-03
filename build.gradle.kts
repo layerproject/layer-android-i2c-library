@@ -63,11 +63,11 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.layer"
                 artifactId = "i2c"
-                version = "1.0.9"
+                version = "1.0.10"
                 
                 pom {
                     name.set("Layer I2C Library")
-                    description.set("Android library for I2C communication with various sensors including AS7341/AS7343 spectral sensors and SHT40 temperature/humidity sensor")
+                    description.set("Android library for I2C communication with various sensors including AS7343 spectral sensors and SHT40 temperature/humidity sensor with transaction-level locking")
                     url.set("https://github.com/layerproject/layer-android-i2c-library")
                     
                     licenses {

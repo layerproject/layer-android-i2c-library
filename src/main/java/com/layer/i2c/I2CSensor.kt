@@ -473,4 +473,150 @@ abstract class I2CSensor(protected val busPath: String) {
             clearDeviceMapping(fd)
         }
     }
+
+    // --- Transaction Support for Atomic Multi-Step Operations ---
+    
+    /**
+     * Executes a block of I2C operations as an atomic transaction.
+     * Holds the file descriptor lock for the entire operation to prevent
+     * race conditions when multiple sensors share the same I2C bus.
+     * 
+     * @param operation The block of I2C operations to execute atomically
+     * @return The result of the operation block
+     */
+    protected fun <T> executeTransaction(operation: () -> T): T {
+        val lock = fdLock ?: this
+        synchronized(lock) {
+            // Ensure we're addressing the correct device at start of transaction
+            if (!switchToDevice()) {
+                throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+            }
+            
+            // Execute the entire operation while holding the lock
+            return operation()
+        }
+    }
+
+    /**
+     * Internal method for I2C byte register reads within a transaction.
+     * Skips device switching since it's already done at transaction start.
+     * 
+     * @param register The register address to read from
+     * @return The byte value read from the register
+     */
+    protected fun readByteRegTransaction(register: Int): Int {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // NO switchToDevice() call - transaction already switched
+        val result = I2cNative.readWord(fileDescriptor, register)
+        if (result < 0) {
+            val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+            Log.e(TAG, errorMessage)
+            throw IOException(errorMessage)
+        }
+        return result and 0xFF
+    }
+
+    /**
+     * Internal method for I2C byte register writes within a transaction.
+     * Skips device switching since it's already done at transaction start.
+     * 
+     * @param register The register address to write to
+     * @param value The byte value to write
+     */
+    protected fun writeByteRegTransaction(register: Int, value: Int) {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // NO switchToDevice() call - transaction already switched  
+        val result = I2cNative.writeByte(fileDescriptor, register, value)
+        if (result < 0) {
+            val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result"
+            Log.e(TAG, errorMessage)
+            throw IOException(errorMessage)
+        }
+    }
+
+    /**
+     * Internal method for I2C word register writes within a transaction.
+     * Skips device switching since it's already done at transaction start.
+     * 
+     * @param lsbRegister The LSB register address to write to
+     * @param value The 16-bit value to write (LSB first, then MSB)
+     */
+    protected fun writeWordRegTransaction(lsbRegister: Int, value: Int) {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        val lsb = value and 0xFF
+        val msb = (value shr 8) and 0xFF
+        
+        // Write LSB first, then MSB - no need to switch device again within transaction
+        val result1 = I2cNative.writeByte(fileDescriptor, lsbRegister, lsb)
+        if (result1 < 0) {
+            throw IOException("I2C Write LSB Error on fd=$fileDescriptor, reg=0x${lsbRegister.toString(16)}, value=0x${lsb.toString(16)}, code=$result1")
+        }
+        
+        val result2 = I2cNative.writeByte(fileDescriptor, lsbRegister + 1, msb)
+        if (result2 < 0) {
+            throw IOException("I2C Write MSB Error on fd=$fileDescriptor, reg=0x${(lsbRegister + 1).toString(16)}, value=0x${msb.toString(16)}, code=$result2")
+        }
+    }
+
+    /**
+     * Internal method for bit manipulation within a transaction.
+     * Skips device switching since it's already done at transaction start.
+     * 
+     * @param register The register address
+     * @param bit The bit position (0-7)
+     * @param on Whether to set (true) or clear (false) the bit
+     */
+    protected fun enableBitTransaction(register: Int, bit: Int, on: Boolean) {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+
+        // Read current value using transaction method
+        val regValue = readByteRegTransaction(register)
+        val bitMask = (1 shl bit)
+        val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
+
+        if (newValue != regValue) {
+            val result = I2cNative.writeByte(fileDescriptor, register, newValue)
+            if (result < 0) {
+                val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result"
+                Log.e(TAG, errorMessage)
+                throw IOException(errorMessage)
+            }
+        }
+    }
+
+    /**
+     * Internal method for setting specific bits in a register within a transaction.
+     * Skips device switching since it's already done at transaction start.
+     * 
+     * @param register The register address
+     * @param shift The bit position to start at
+     * @param width The number of bits to set
+     * @param value The value to set in those bits
+     */
+    protected fun setRegisterBitsTransaction(register: Int, shift: Int, width: Int, value: Int) {
+        if (fileDescriptor < 0) {
+            throw IOException("Invalid file descriptor")
+        }
+        
+        // Read current value using transaction method
+        val regValue = readByteRegTransaction(register)
+        val mask = ((1 shl width) - 1) shl shift
+        val newValue = (regValue and mask.inv()) or ((value shl shift) and mask)
+        
+        val result = I2cNative.writeByte(fileDescriptor, register, newValue)
+        if (result < 0) {
+            throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+        }
+    }
 }

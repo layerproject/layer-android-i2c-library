@@ -66,7 +66,7 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
 
         // AS7343 ID register and expected value
         private const val AS7343_ID_REG = 0x5a
-        private const val AS7343_ID_VALUE = 0
+        private const val AS7343_ID_VALUE = 0x81  // Correct ID value for AS7343
         
         // Reset and Recovery Registers
         private const val AS7343_CONTROL_REG = 0xFA        // Control register with reset functionality
@@ -298,119 +298,68 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
 
     /**
      * Reads all 18 data registers from the sensor after triggering a measurement.
+     * Uses transaction-level locking to ensure atomic operation across all I2C calls.
      * Assumes sensor is initialized.
-     * @param fd File descriptor for the I2C connection
      * @return Map containing all 18 data register values (using names from dataRegisterNames), or empty map on error.
      */
     @Synchronized
     private fun readAllChannels(): Map<String, Int> {
         if (fileDescriptor < 0) return emptyMap()
 
-        // Perform sensor health check before attempting to read
-        if (!performSensorHealthCheck()) {
-            Log.w(TAG, "Sensor health check failed on fd=$fileDescriptor, attempting recovery")
-            if (!recoverSensor()) {
-                Log.e(TAG, "Sensor recovery failed on fd=$fileDescriptor")
-                return emptyMap()
+        return try {
+            executeTransaction {
+                val channelData = mutableMapOf<String, Int>()
+                
+                setBankTransaction(false) // Ensure Bank 0
+                Log.d(TAG, "Starting spectral measurement on fd=$fileDescriptor")
+
+                // 1. Enable Spectral Measurement
+                enableSpectralMeasurementTransaction(true)
+
+                // 2. Wait for Data Ready
+                if (!waitForDataReadyTransaction(2000)) { // Use helper with timeout
+                    Log.e(TAG,"Timeout waiting for data ready on fd=$fileDescriptor")
+                    enableSpectralMeasurementTransaction(false) // Ensure measurement is disabled
+                    return@executeTransaction emptyMap<String, Int>() // Return empty on timeout
+                }
+                Log.d(TAG, "Data ready on fd=$fileDescriptor")
+
+                // 3. Read ASTATUS (contains saturation info, read to clear it)
+                readByteRegTransaction(AS7343_ASTATUS_REG)
+                // We don't use the value, but reading it clears latched status bits
+
+                // 4. Read Data Registers atomically
+                for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
+                    val value = readDataChannelTransaction(i)
+                    val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
+                    channelData[name] = value
+                }
+
+                // 5. Disable Spectral Measurement
+                enableSpectralMeasurementTransaction(false)
+                Log.d(TAG, "Spectral measurement finished on fd=$fileDescriptor")
+
+                channelData
             }
-            Log.i(TAG, "Sensor recovery successful on fd=$fileDescriptor")
-        }
-
-        val channelData = mutableMapOf<String, Int>()
-        try {
-            setBank(false) // Ensure Bank 0
-            Log.d(TAG, "Starting spectral measurement on fd=$fileDescriptor")
-
-            // 1. Enable Spectral Measurement
-            enableSpectralMeasurement(true)
-
-            // 2. Wait for Data Ready
-            if (!waitForDataReady(2000)) { // Use helper with timeout
-                Log.e(TAG,"Timeout waiting for data ready on fd=$fileDescriptor")
-                enableSpectralMeasurement(false) // Ensure measurement is disabled
-                return emptyMap() // Return empty on timeout
-            }
-            Log.d(TAG, "Data ready on fd=$fileDescriptor")
-
-            // 3. Read ASTATUS (contains saturation info, read to clear it)
-            readByteReg(AS7343_ASTATUS_REG)
-            // We don't use the value, but reading it clears latched status bits
-
-            // 4. Read Data Registers
-            for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
-                val value = readDataChannel(i)
-                val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
-                channelData[name] = value
-            }
-
-            // 5. Disable Spectral Measurement
-            enableSpectralMeasurement(false)
-            Log.d(TAG, "Spectral measurement finished on fd=$fileDescriptor")
-
-            return channelData
-
         } catch (e: Exception) {
-            Log.e(TAG, "Error during readAllChannels for fd=$fileDescriptor: ${e.message}", e)
-            // Attempt to disable measurement on error
-            try { enableSpectralMeasurement(false) } catch (_: Exception) {}
+            Log.e(TAG, "Error during readAllChannels transaction for fd=$fileDescriptor: ${e.message}", e)
             
-            // If we get an I2C error, try recovery
+            // If we get an I2C error, try recovery (but don't retry automatically)
             if (e.message?.contains("I2C") == true) {
                 Log.w(TAG, "I2C error detected, attempting sensor recovery on fd=$fileDescriptor")
-                if (recoverSensor()) {
-                    Log.i(TAG, "Sensor recovery successful after I2C error on fd=$fileDescriptor")
-                    // Don't retry automatically here - let the caller decide
+                try {
+                    if (recoverSensor()) {
+                        Log.i(TAG, "Sensor recovery successful after I2C error on fd=$fileDescriptor")
+                    }
+                } catch (recoveryException: Exception) {
+                    Log.e(TAG, "Error during recovery: ${recoveryException.message}")
                 }
             }
             
-            return emptyMap() // Return empty on error
+            emptyMap() // Return empty on error
         }
     }
 
-    /**
-     * Performs a health check on the sensor to verify it's responsive and in a good state.
-     * @return true if sensor is healthy, false if recovery is needed
-     */
-    @Synchronized
-    private fun performSensorHealthCheck(): Boolean {
-        if (fileDescriptor < 0) {
-            return false
-        }
-
-        try {
-            // Check 1: Verify sensor is responsive (can read ID register)
-            if (!isSensorResponsive()) {
-                Log.w(TAG, "Sensor health check failed: not responsive on fd=$fileDescriptor")
-                return false
-            }
-
-            // Check 2: Verify we can read basic status registers
-            val enableReg = readByteRegDirect(REG_ENABLE)
-            val powerOn = (enableReg and (1 shl BIT_POWER)) != 0
-            
-            if (!powerOn) {
-                Log.w(TAG, "Sensor health check failed: power not on fd=$fileDescriptor")
-                return false
-            }
-
-            // Check 3: Verify bank switching works properly
-            setBankDirect(false)
-            val configReg = readByteRegDirect(REG_CONFIG0)
-            val bankBit = (configReg shr BIT_REGBANK) and 1
-            
-            if (bankBit != 0) {
-                Log.w(TAG, "Sensor health check failed: bank switching issue on fd=$fileDescriptor")
-                return false
-            }
-
-            Log.d(TAG, "Sensor health check passed on fd=$fileDescriptor")
-            return true
-
-        } catch (e: Exception) {
-            Log.w(TAG, "Sensor health check failed with exception on fd=$fileDescriptor: ${e.message}")
-            return false
-        }
-    }
 
     @Synchronized
     private fun getIsDataReady(): Boolean {
@@ -689,4 +638,68 @@ class AS7343Sensor(busPath: String) : AS73XXSensor(busPath) {
         Log.e(TAG, "All recovery methods failed for sensor on fd=$fileDescriptor")
         return false
     }
+
+    // --- Transaction Helper Methods ---
+    
+    /**
+     * Transaction version of setBank - sets the register bank without device switching
+     */
+    private fun setBankTransaction(bank0: Boolean) {
+        val bankBit = if (bank0) 0 else 1
+        val regValue = readByteRegTransaction(REG_CONFIG0)
+        val newValue = (regValue and 0xEF) or (bankBit shl 4)
+        writeByteRegTransaction(REG_CONFIG0, newValue)
+    }
+
+    /**
+     * Transaction version of enableSpectralMeasurement
+     */
+    private fun enableSpectralMeasurementTransaction(enable: Boolean) {
+        setBankTransaction(false) // Ensure Bank 0
+        
+        if (enable) {
+            // Make sure power is on before enabling measurement
+            val enableReg = readByteRegTransaction(REG_ENABLE)
+            if (enableReg and (1 shl BIT_POWER) == 0) {
+                Log.w(TAG, "Warning: Enabling measurement while power is OFF. Enabling power first.")
+                enableBitTransaction(REG_ENABLE, BIT_POWER, true)
+                Thread.sleep(1) // Small delay after power on
+            }
+        }
+        enableBitTransaction(REG_ENABLE, BIT_MEASUREMENT, enable)
+    }
+
+    /**
+     * Transaction version of waitForDataReady
+     */
+    private fun waitForDataReadyTransaction(timeoutMs: Long): Boolean {
+        val startTime = System.currentTimeMillis()
+        
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val statusReg = readByteRegTransaction(AS7343_STATUS2_REG)
+            val avalid = (statusReg shr AS7343_STATUS2_AVALID_BIT) and 1 == 1
+            
+            if (avalid) {
+                return true
+            }
+            
+            Thread.sleep(10) // Wait 10ms before next check
+        }
+        
+        return false // Timeout
+    }
+
+    /**
+     * Transaction version of readDataChannel
+     */
+    private fun readDataChannelTransaction(channelIndex: Int): Int {
+        // Read data registers directly without additional device switching
+        val dataLReg = AS7343_DATA0_L_REG + (channelIndex * 2)
+        val dataHReg = dataLReg + 1
+        val dataL = readByteRegTransaction(dataLReg)
+        val dataH = readByteRegTransaction(dataHReg)
+        return ((dataH and 0xFF) shl 8) or (dataL and 0xFF)
+    }
+
+
 }
