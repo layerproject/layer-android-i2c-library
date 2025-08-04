@@ -7,7 +7,11 @@ import java.io.IOException
  * Base class for all I2C sensors.
  * Provides common I2C communication methods and management.
  */
-abstract class I2CSensor(protected val busPath: String) {
+abstract class I2CSensor(
+    protected val busPath: String,
+    protected val multiplexer: TCA9548Multiplexer? = null,
+    protected val multiplexerChannel: Int? = null
+) {
     companion object {
         protected const val TAG = "I2CSensor"
         
@@ -49,6 +53,39 @@ abstract class I2CSensor(protected val busPath: String) {
     
     // Each sensor type must specify its own I2C address
     protected abstract val sensorAddress: Int
+    
+    /**
+     * Get the multiplexer channel this sensor is connected to.
+     * @return The multiplexer channel (0-7) or null if directly connected
+     */
+    fun getSensorMultiplexerChannel(): Int? = multiplexerChannel
+    
+    /**
+     * Get the multiplexer this sensor is connected through.
+     * @return The TCA9548Multiplexer instance or null if directly connected
+     */
+    fun getSensorMultiplexer(): TCA9548Multiplexer? = multiplexer
+    
+    /**
+     * Check if this sensor is connected through a multiplexer.
+     * @return true if using a multiplexer, false if directly connected
+     */
+    fun isMultiplexed(): Boolean = multiplexer != null && multiplexerChannel != null
+    
+    // Validate multiplexer configuration
+    init {
+        if (multiplexer != null && multiplexerChannel == null) {
+            throw IllegalArgumentException("Multiplexer channel must be specified when using a multiplexer")
+        }
+        if (multiplexer == null && multiplexerChannel != null) {
+            throw IllegalArgumentException("Multiplexer must be specified when using a multiplexer channel")
+        }
+        if (multiplexer != null && multiplexerChannel != null) {
+            if (multiplexerChannel < 0 || multiplexerChannel >= multiplexer.maxChannels) {
+                throw IllegalArgumentException("Multiplexer channel $multiplexerChannel is out of range (0-${multiplexer.maxChannels - 1})")
+            }
+        }
+    }
     
     /**
      * Sensor-specific initialization after connection is established
@@ -134,6 +171,18 @@ abstract class I2CSensor(protected val busPath: String) {
 
         Log.d(TAG, "Connecting to sensor on $busPath for address 0x${sensorAddress.toString(16)}...")
         
+        // If using a multiplexer, connect to it first
+        if (multiplexer != null) {
+            if (!multiplexer.isReady()) {
+                Log.d(TAG, "Multiplexer not ready, attempting to connect...")
+                if (!multiplexer.connect()) {
+                    Log.e(TAG, "Failed to connect to multiplexer for sensor 0x${sensorAddress.toString(16)}")
+                    return false
+                }
+            }
+            Log.d(TAG, "Multiplexer ready for sensor 0x${sensorAddress.toString(16)}")
+        }
+        
         // Check if this address is already in use on this bus
         if (busManager.isAddressInUse(busPath, sensorAddress)) {
             Log.e(TAG, "Address 0x${sensorAddress.toString(16)} already in use on bus $busPath")
@@ -184,8 +233,8 @@ abstract class I2CSensor(protected val busPath: String) {
      * Switches the I2C bus to this device's address only if needed.
      * This must be called before any I/O operations when multiple devices
      * share the same I2C bus/file descriptor.
+     * If a multiplexer is configured, it also switches to the correct channel.
      * 
-     * @param fd File descriptor to use
      * @return true if the switch was successful, false otherwise
      */
     protected fun switchToDevice(): Boolean {
@@ -197,6 +246,25 @@ abstract class I2CSensor(protected val busPath: String) {
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
+            // If using a multiplexer, ensure the correct channel is selected first
+            if (multiplexer != null && multiplexerChannel != null) {
+                if (!multiplexer.isReady()) {
+                    Log.e(TAG, "Multiplexer not ready for sensor at address 0x${sensorAddress.toString(16)}")
+                    return false
+                }
+                
+                // Switch to the multiplexer and select our channel
+                if (!multiplexer.isChannelEnabled(multiplexerChannel)) {
+                    try {
+                        multiplexer.selectChannel(multiplexerChannel)
+                        Log.d(TAG, "Selected multiplexer channel $multiplexerChannel for sensor 0x${sensorAddress.toString(16)}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to select multiplexer channel $multiplexerChannel: ${e.message}")
+                        return false
+                    }
+                }
+            }
+            
             // Check if we're already addressing the correct device
             val currentDevice = getCurrentDevice(fileDescriptor)
             if (currentDevice == sensorAddress) {
@@ -620,5 +688,13 @@ abstract class I2CSensor(protected val busPath: String) {
         if (result < 0) {
             throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
         }
+    }
+    
+    /**
+     * Check if this sensor is using a multiplexer.
+     * @return true if using a multiplexer, false otherwise
+     */
+    fun isUsingMultiplexer(): Boolean {
+        return multiplexer != null
     }
 }

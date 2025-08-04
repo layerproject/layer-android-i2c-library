@@ -7,7 +7,26 @@ import kotlin.math.min
  * High-level interface for the AS7343 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7343Sensor(busPath: String) : I2CSensor(busPath) {
+class AS7343Sensor : I2CSensor {
+    
+    /**
+     * Constructor for direct I2C connection (no multiplexer).
+     * @param busPath The I2C bus path (e.g., "/dev/i2c-0")
+     */
+    constructor(busPath: String) : super(busPath)
+    
+    /**
+     * Constructor for multiplexed I2C connection.
+     * @param busPath The I2C bus path (e.g., "/dev/i2c-0")
+     * @param multiplexer The TCA9548 multiplexer instance
+     * @param multiplexerChannel The channel on the multiplexer (0-7)
+     */
+    constructor(
+        busPath: String, 
+        multiplexer: TCA9548Multiplexer, 
+        multiplexerChannel: Int
+    ) : super(busPath, multiplexer, multiplexerChannel)
+    
     // Default address for AS7343 sensor
     override val sensorAddress: Int = 0x39
     

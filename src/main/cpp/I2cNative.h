@@ -69,6 +69,14 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_switchDeviceAddress
         (JNIEnv *, jclass, jint, jint);
 
+/*
+ * Class:     com_layer_i2c_I2cNative
+ * Method:    scanAddress
+ * Signature: (II)I
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_scanAddress
+        (JNIEnv *, jclass, jint, jint);
+
 #ifdef __cplusplus
 }
 #endif

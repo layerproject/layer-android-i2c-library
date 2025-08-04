@@ -201,3 +201,85 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
     __u8 byte = value & 0xFF;
     return write(fd, &byte, 1);
 }
+
+/**
+ * SMBus Quick Write probe - used by i2cdetect for device detection
+ * This is the most compatible method for detecting I2C devices
+ */
+static inline __s32 i2c_smbus_quick_write(int file, __u8 deviceAddress)
+{
+    // Switch to the device address first
+    if (switch_i2c_device(file, deviceAddress) < 0) {
+        return -1;
+    }
+    
+    // Perform SMBus Quick Write - just sends address + write bit
+    return i2c_smbus_access(file, I2C_SMBUS_WRITE, 0, I2C_SMBUS_QUICK, NULL);
+}
+
+/**
+ * SMBus Read Byte probe - alternative method for device detection
+ * Some devices respond better to read operations
+ */
+static inline __s32 i2c_smbus_read_byte_probe(int file, __u8 deviceAddress)
+{
+    union i2c_smbus_data data;
+    
+    // Switch to the device address first
+    if (switch_i2c_device(file, deviceAddress) < 0) {
+        return -1;
+    }
+    
+    // Perform SMBus Read Byte
+    return i2c_smbus_access(file, I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &data);
+}
+
+/**
+ * Scans for a device at a specific I2C address using i2cdetect-style probing.
+ * Uses SMBus Quick Write first (most compatible), falls back to Read Byte if needed.
+ * 
+ * @param fd File descriptor for the I2C bus
+ * @param deviceAddress 7-bit I2C address to probe (0x08-0x77)
+ * @return 1 if device responds, 0 if no device found, -1 if error
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_scanAddress
+        (JNIEnv *env, jclass jcl, jint fd, jint deviceAddress)
+{
+    __u8 devAddr = deviceAddress & 0x7F; // Ensure 7-bit address
+    
+    // Skip reserved addresses (like i2cdetect does)
+    if (devAddr < 0x08 || devAddr > 0x77) {
+        return 0; // Not a valid user device address
+    }
+    
+    // Skip addresses that are typically reserved or problematic
+    // 0x00-0x07: General call and reserved addresses
+    // 0x78-0x7F: Reserved addresses
+    if (devAddr <= 0x07 || devAddr >= 0x78) {
+        return 0;
+    }
+    
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "Scanning I2C address 0x%02X on FD: %d", devAddr, fd);
+    
+    // Method 1: Try SMBus Quick Write (most compatible, used by i2cdetect -q)
+    __s32 result = i2c_smbus_quick_write(fd, devAddr);
+    if (result == 0) {
+        syslog(LOG_INFO, "Device found at 0x%02X using Quick Write", devAddr);
+        closelog();
+        return 1; // Device responded to Quick Write
+    }
+    
+    // Method 2: Try SMBus Read Byte (alternative method, used by i2cdetect -r) 
+    result = i2c_smbus_read_byte_probe(fd, devAddr);
+    if (result >= 0) {
+        syslog(LOG_INFO, "Device found at 0x%02X using Read Byte", devAddr);
+        closelog();
+        return 1; // Device responded to Read Byte
+    }
+    
+    // No response from either method
+    syslog(LOG_DEBUG, "No device found at 0x%02X", devAddr);
+    closelog();
+    return 0;
+}

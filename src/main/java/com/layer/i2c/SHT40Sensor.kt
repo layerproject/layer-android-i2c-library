@@ -7,7 +7,26 @@ import java.io.IOException
  * SHT40 Temperature and Humidity Sensor implementation.
  * This sensor provides accurate temperature and humidity readings.
  */
-class SHT40Sensor(devicePath: String) : I2CSensor(devicePath) {
+class SHT40Sensor : I2CSensor {
+    
+    /**
+     * Constructor for direct I2C connection (no multiplexer).
+     * @param devicePath The I2C bus path (e.g., "/dev/i2c-0")
+     */
+    constructor(devicePath: String) : super(devicePath)
+    
+    /**
+     * Constructor for multiplexed I2C connection.
+     * @param devicePath The I2C bus path (e.g., "/dev/i2c-0")
+     * @param multiplexer The TCA9548 multiplexer instance
+     * @param multiplexerChannel The channel on the multiplexer (0-7)
+     */
+    constructor(
+        devicePath: String, 
+        multiplexer: TCA9548Multiplexer, 
+        multiplexerChannel: Int
+    ) : super(devicePath, multiplexer, multiplexerChannel)
+    
     companion object {
         private const val TAG = "SHT40Sensor"
         

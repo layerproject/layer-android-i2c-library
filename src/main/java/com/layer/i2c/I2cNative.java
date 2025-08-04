@@ -98,4 +98,14 @@ public class I2cNative {
      * @return 0 if successful, -1 if error
      */
     public static native int switchDeviceAddress(int fd, int deviceAddress);
+    
+    /**
+     * Scans for a device at a specific I2C address.
+     * This method attempts to communicate with the device to check if it responds.
+     *
+     * @param fd            file descriptor of i2c bus
+     * @param deviceAddress I2C address to scan (7-bit address, 0x08-0x77 range)
+     * @return 1 if device responds, 0 if no device found, -1 if error
+     */
+    public static native int scanAddress(int fd, int deviceAddress);
 }
