@@ -8,7 +8,7 @@ import java.io.IOException
  * Provides common I2C communication methods and management.
  */
 abstract class I2CSensor(
-    protected val busPath: String,
+    val busPath: String,
     protected val multiplexer: TCA9548Multiplexer? = null,
     protected val multiplexerChannel: Int? = null
 ) {
@@ -102,7 +102,8 @@ abstract class I2CSensor(
     fun isReady(): Boolean {
         // First, check if our bus is still open (could have been closed by another sensor)
         if (isBusOpen && fileDescriptor >= 0) {
-            val currentFd = busManager.getBusFd(busPath)
+            val effectiveBusPath = getEffectiveBusPath()
+            val currentFd = busManager.getBusFd(effectiveBusPath)
             if (currentFd != fileDescriptor) {
                 // Bus was closed/reopened by another component
                 isBusOpen = false
@@ -115,17 +116,31 @@ abstract class I2CSensor(
     }
 
     /**
+     * Gets the effective bus path for this sensor, including multiplexer channel if applicable.
+     * This ensures multiplexed sensors have unique identities.
+     * @return Bus path with channel info for multiplexed sensors, plain path for direct connections
+     */
+    private fun getEffectiveBusPath(): String {
+        return if (multiplexer != null && multiplexerChannel != null) {
+            "${busPath}:ch${multiplexerChannel}"
+        } else {
+            busPath
+        }
+    }
+
+    /**
      * Opens an I2C connection to the sensor on the specified bus.
      * @return File descriptor if successful, -1 if failed
      */
     private fun openDevice(): Boolean {
-        val fd = busManager.openBus(busPath, sensorAddress)
+        val effectiveBusPath = getEffectiveBusPath()
+        val fd = busManager.openBus(effectiveBusPath, sensorAddress)
         if (fd < 0) {
-            Log.e(TAG, "Failed to open I2C bus $busPath for address 0x${sensorAddress.toString(16)}")
+            Log.e(TAG, "Failed to open I2C bus $effectiveBusPath for address 0x${sensorAddress.toString(16)}")
             isBusOpen = false
             return false
         } else {
-            Log.d(TAG, "Successfully opened I2C bus $busPath for address 0x${sensorAddress.toString(16)}")
+            Log.d(TAG, "Successfully opened I2C bus $effectiveBusPath for address 0x${sensorAddress.toString(16)}")
             isBusOpen = true
             fileDescriptor = fd
             
@@ -142,11 +157,12 @@ abstract class I2CSensor(
     private fun closeDevice() {
         if (isBusOpen) {
             val fd = fileDescriptor
+            val effectiveBusPath = getEffectiveBusPath()
             
             // Clean up any locks before closing
             cleanUpFdResources(fd)
             
-            busManager.closeBus(busPath, sensorAddress)
+            busManager.closeBus(effectiveBusPath, sensorAddress)
             isBusOpen = false
         }
     }
@@ -169,7 +185,8 @@ abstract class I2CSensor(
             fileDescriptor = -1
         }
 
-        Log.d(TAG, "Connecting to sensor on $busPath for address 0x${sensorAddress.toString(16)}...")
+        val effectiveBusPath = getEffectiveBusPath()
+        Log.d(TAG, "Connecting to sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)}...")
         
         // If using a multiplexer, connect to it first
         if (multiplexer != null) {
@@ -184,13 +201,13 @@ abstract class I2CSensor(
         }
         
         // Check if this address is already in use on this bus
-        if (busManager.isAddressInUse(busPath, sensorAddress)) {
-            Log.e(TAG, "Address 0x${sensorAddress.toString(16)} already in use on bus $busPath")
+        if (busManager.isAddressInUse(effectiveBusPath, sensorAddress)) {
+            Log.e(TAG, "Address 0x${sensorAddress.toString(16)} already in use on bus $effectiveBusPath")
             return false
         }
         
         if (!openDevice()) {
-            Log.e(TAG, "Failed to open sensor on $busPath for address 0x${sensorAddress.toString(16)}.")
+            Log.e(TAG, "Failed to open sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)}.")
             isInitialized = false
             isBusOpen = false
             return false
@@ -200,14 +217,14 @@ abstract class I2CSensor(
         isInitialized = initializeSensor()
 
         if (!isInitialized) {
-            Log.e(TAG, "Failed to initialize sensor on $busPath for address 0x${sensorAddress.toString(16)} (fd=$fileDescriptor). Closing.")
+            Log.e(TAG, "Failed to initialize sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)} (fd=$fileDescriptor). Closing.")
             closeDevice()
             fileDescriptor = -1
             isBusOpen = false
             return false
         }
 
-        Log.i(TAG, "Sensor on $busPath connected and initialized successfully.")
+        Log.i(TAG, "Sensor on $effectiveBusPath connected and initialized successfully.")
         return true
     }
 
@@ -217,15 +234,17 @@ abstract class I2CSensor(
     @Synchronized
     open fun disconnect() {
         if (isBusOpen) {
-            Log.d(TAG, "Disconnecting sensor on $busPath for address $sensorAddress (fd=$fileDescriptor)...")
+            val effectiveBusPath = getEffectiveBusPath()
+            Log.d(TAG, "Disconnecting sensor on $effectiveBusPath for address $sensorAddress (fd=$fileDescriptor)...")
             closeDevice()
             fileDescriptor = -1
             isBusOpen = false
             isInitialized = false
             fdLock = null
-            Log.i(TAG, "Sensor on $busPath disconnected.")
+            Log.i(TAG, "Sensor on $effectiveBusPath disconnected.")
         } else {
-            Log.d(TAG, "Sensor on $busPath already disconnected.")
+            val effectiveBusPath = getEffectiveBusPath()
+            Log.d(TAG, "Sensor on $effectiveBusPath already disconnected.")
         }
     }
 

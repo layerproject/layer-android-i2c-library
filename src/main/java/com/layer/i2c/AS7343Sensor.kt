@@ -105,7 +105,13 @@ class AS7343Sensor : I2CSensor {
      */
     override fun disconnect() {
         if (isBusOpen) {
-            Log.d(TAG, "Disconnecting sensor on $busPath (fd=$fileDescriptor)...")
+            val locationInfo = if (isMultiplexed()) {
+                "multiplexer channel ${getSensorMultiplexerChannel()}"
+            } else {
+                "direct connection"
+            }
+            Log.d(TAG, "Disconnecting sensor on $busPath ($locationInfo) (fd=$fileDescriptor)...")
+            
             // Attempt to power down before closing
             if (isInitialized) { // Only try if we think it was initialized
                 try {
@@ -118,7 +124,12 @@ class AS7343Sensor : I2CSensor {
             // Call parent's closeDevice() which handles all the cleanup
             super.disconnect()
         } else {
-            Log.d(TAG, "Sensor on $busPath already disconnected.")
+            val locationInfo = if (isMultiplexed()) {
+                "multiplexer channel ${getSensorMultiplexerChannel()}"
+            } else {
+                "direct connection"
+            }
+            Log.d(TAG, "Sensor on $busPath ($locationInfo) already disconnected.")
         }
     }
     

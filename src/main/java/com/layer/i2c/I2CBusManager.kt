@@ -33,29 +33,47 @@ class I2CBusManager private constructor() {
     private val fdLockMap = ConcurrentHashMap<Int, Any>()
     
     /**
+     * Extracts the physical bus path from an effective bus path.
+     * For multiplexed sensors, this removes the channel suffix.
+     * 
+     * @param effectiveBusPath The effective bus path (e.g., "/dev/i2c-0:ch7" or "/dev/i2c-0")
+     * @return The physical bus path (e.g., "/dev/i2c-0")
+     */
+    private fun getPhysicalBusPath(effectiveBusPath: String): String {
+        return if (effectiveBusPath.contains(":ch")) {
+            effectiveBusPath.substringBefore(":ch")
+        } else {
+            effectiveBusPath
+        }
+    }
+
+    /**
      * Opens an I2C bus for a specific address if not already open.
      * If the bus is already open, it increments the reference count.
      * 
-     * @param busPath The path to the I2C bus (e.g., "/dev/i2c-0")
+     * @param busPath The effective bus path (e.g., "/dev/i2c-0" or "/dev/i2c-0:ch7")
      * @param address The I2C address of the device on the bus
      * @return File descriptor if successful, -1 if failed
      */
     @Synchronized
     fun openBus(busPath: String, address: Int): Int {
-        // First check if we already have this bus open
-        var fd = busMap[busPath]
+        // Get the physical bus path for file descriptor operations
+        val physicalBusPath = getPhysicalBusPath(busPath)
+        
+        // First check if we already have the physical bus open
+        var fd = busMap[physicalBusPath]
         
         // If not open, open it
         if (fd == null || fd < 0) {
-            fd = I2cNative.openBus(busPath, address)
+            fd = I2cNative.openBus(physicalBusPath, address)
             if (fd < 0) {
                 Log.e(TAG, "Failed to open I2C bus $busPath for address 0x${address.toString(16)}")
                 return -1
             }
-            busMap[busPath] = fd
+            busMap[physicalBusPath] = fd
             referenceCountMap[busPath] = 1
             
-            // Initialize address set for this bus
+            // Initialize address set for this effective bus path
             addressMap[busPath] = mutableSetOf(address)
             
             // Create a lock object for this file descriptor
@@ -66,10 +84,13 @@ class I2CBusManager private constructor() {
             
             Log.d(TAG, "Opened I2C bus $busPath for address 0x${address.toString(16)}, fd=$fd")
         } else {
-            // Bus already open, increment reference count
+            // Physical bus already open, increment reference count for this effective bus path
             referenceCountMap[busPath] = (referenceCountMap[busPath] ?: 0) + 1
             
-            // Add address to the set of active addresses for this bus
+            // Add address to the set of active addresses for this effective bus path
+            if (addressMap[busPath] == null) {
+                addressMap[busPath] = mutableSetOf()
+            }
             addressMap[busPath]?.add(address)
             
             Log.d(TAG, "Reusing I2C bus $busPath for address 0x${address.toString(16)}, fd=$fd, refCount=${referenceCountMap[busPath]}")
@@ -80,35 +101,48 @@ class I2CBusManager private constructor() {
     
     /**
      * Closes an I2C bus when a sensor is done with it.
-     * Only actually closes the file descriptor when the reference count drops to zero.
+     * Only actually closes the file descriptor when all references are gone.
      * 
-     * @param busPath The path to the I2C bus
+     * @param busPath The effective bus path (e.g., "/dev/i2c-0" or "/dev/i2c-0:ch7")
      * @param address The I2C address of the device being closed
      */
     @Synchronized
     fun closeBus(busPath: String, address: Int) {
-        val fd = busMap[busPath] ?: return
+        val physicalBusPath = getPhysicalBusPath(busPath)
+        val fd = busMap[physicalBusPath] ?: return
         
-        // Get the current reference count
+        // Get the current reference count for this effective bus path
         val refCount = referenceCountMap[busPath] ?: 0
         
-        // Remove this sensor's address from the set of active addresses
+        // Remove this sensor's address from the set of active addresses for this effective bus path
         addressMap[busPath]?.remove(address)
         
         if (refCount <= 1) {
-            // Last reference, actually close the bus
-            I2cNative.closeBus(fd)
-            busMap.remove(busPath)
+            // Last reference for this effective bus path
             referenceCountMap.remove(busPath)
             addressMap.remove(busPath)
             
-            // Clean up the current device tracking in I2CSensor
-            I2CSensor.clearDeviceMapping(fd)
+            // Check if there are any other effective bus paths using the same physical bus
+            val otherReferences = referenceCountMap.keys.any { 
+                getPhysicalBusPath(it) == physicalBusPath && it != busPath 
+            }
             
-            // Remove the lock object for this file descriptor
-            fdLockMap.remove(fd)
-            
-            Log.d(TAG, "Closed I2C bus $busPath (fd=$fd), no more references")
+            if (!otherReferences) {
+                // No other effective bus paths using this physical bus, close it
+                I2cNative.closeBus(fd)
+                busMap.remove(physicalBusPath)
+                
+                // Clean up the current device tracking in I2CSensor
+                I2CSensor.clearDeviceMapping(fd)
+                
+                // Remove the lock object for this file descriptor
+                fdLockMap.remove(fd)
+                
+                Log.d(TAG, "Closed I2C bus $busPath (fd=$fd), no more references to physical bus")
+            } else {
+                Log.d(TAG, "Released I2C bus $busPath for address 0x${address.toString(16)}, " +
+                       "but physical bus still has other references")
+            }
         } else {
             // Decrement reference count
             referenceCountMap[busPath] = refCount - 1
@@ -127,9 +161,13 @@ class I2CBusManager private constructor() {
     
     /**
      * Get the file descriptor for a bus if it's open
+     * 
+     * @param busPath The effective bus path (e.g., "/dev/i2c-0" or "/dev/i2c-0:ch7")
+     * @return File descriptor if open, -1 otherwise
      */
     fun getBusFd(busPath: String): Int {
-        return busMap[busPath] ?: -1
+        val physicalBusPath = getPhysicalBusPath(busPath)
+        return busMap[physicalBusPath] ?: -1
     }
     
     /**
