@@ -223,8 +223,8 @@ data class I2CDetectResult(
      * @param deviceType The device type to filter by
      * @return List of devices matching the type
      */
-    fun getDevicesOfType(deviceType: String): List<DeviceInfo> {
-        return detectedDevices.filter { it.deviceType == deviceType }
+    public fun getDevicesOfType(deviceType: String): List<DeviceInfo> {
+        return detectedDevices.filter { it.deviceType?.contains(deviceType)==true }
     }
     
     /**

@@ -3,20 +3,26 @@ package com.layer.i2c
 import android.util.Log
 import java.io.IOException
 
+typealias I2CMultiplexer = TCA9548Multiplexer
+
+interface MultiplexerState : SensorState {
+    val deviceSummary : String
+}
+
 /**
  * Base class for TCA9548 I2C multiplexer family.
- * 
- * The TCA9548 is an 8-channel I2C multiplexer that allows multiple I2C devices 
- * with the same address to be connected to a single I2C bus. Each channel can be 
+ *
+ * The TCA9548 is an 8-channel I2C multiplexer that allows multiple I2C devices
+ * with the same address to be connected to a single I2C bus. Each channel can be
  * individually enabled or disabled.
- * 
+ *
  * Supported devices:
  * - TCA9548: 8-channel switch
  * - PCA9548: 8-channel switch (compatible)
  * - PCA9546: 4-channel switch
  * - PCA9545: 4-channel switch with interrupt
  * - PCA9543: 2-channel switch with interrupt
- * 
+ *
  * @param busPath The I2C bus path (e.g., "/dev/i2c-0")
  * @param multiplexerAddress The I2C address of the multiplexer (0x70-0x77)
  */
@@ -25,9 +31,9 @@ open class TCA9548Multiplexer(
     private val multiplexerAddress: Int = 0x70
 ) : I2CSensor(busPath) {
     
-    companion object {
+    companion object : SensorFactory<I2CSensor> {
         private const val TAG = "TCA9548Multiplexer"
-        
+        override fun create(busPath:String): TCA9548Multiplexer = TCA9548Multiplexer(busPath)
         // TCA9548 constants
         const val DEFAULT_ADDRESS = 0x70
         const val MIN_ADDRESS = 0x70
@@ -49,6 +55,8 @@ open class TCA9548Multiplexer(
     // Maximum number of channels for this multiplexer variant
     open val maxChannels: Int = MAX_CHANNELS
     
+    var deviceMap : ChannelDeviceMap? = null
+    
     /**
      * Initialize the multiplexer. Since device presence was already verified through I2CDetect,
      * we simply reset it to a known state and read the initial channel mask.
@@ -63,12 +71,14 @@ open class TCA9548Multiplexer(
             
             synchronized(fdLock ?: this) {
                 if (!switchToDevice()) {
+                    connected = false
                     throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
                 }
                 
                 // Write reset mask directly
                 val result = I2cNative.write(fileDescriptor, validMask)
                 if (result < 0) {
+                    connected = false
                     throw IOException("Failed to write channel mask to multiplexer: I2C error $result")
                 }
                 currentChannelMask = validMask
@@ -86,17 +96,32 @@ open class TCA9548Multiplexer(
         }
     }
     
+    override fun getSensorState() = object : MultiplexerState {
+        override val connected = isConnected()
+        override val updateTS = System.currentTimeMillis()
+        override val sensorId = this@TCA9548Multiplexer.toString()
+        override val deviceSummary = "Multiplexer ${busPath} address 0x${multiplexerAddress.toString(16)}: Devices: $(deviceMap.toString()}"
+    }
+    
+    override fun readDataImpl(): Map<String, Int> {
+        if (!isReady()) {
+            return mapOf("ERROR" to 65535)
+        }
+        return mapOf("channelMask" to currentChannelMask)
+    }
+    
     /**
      * Check if the multiplexer is connected and responding.
      * @return true if the multiplexer is accessible, false otherwise
      */
-    fun isConnected(): Boolean {
-        return try {
+    override fun isConnected(): Boolean {
+        try {
             readChannelMask()
-            true
+            connected = true
         } catch (e: IOException) {
-            false
+            connected = false
         }
+        return connected
     }
     
     /**
@@ -273,7 +298,7 @@ open class TCA9548Multiplexer(
      * Execute an operation on a specific channel.
      * This method temporarily switches to the specified channel, executes the operation,
      * and then restores the previous channel configuration.
-     * 
+     *
      * @param channel The channel to execute the operation on
      * @param operation The operation to execute
      * @return The result of the operation
@@ -294,7 +319,7 @@ open class TCA9548Multiplexer(
      * Execute an operation with specific channels enabled.
      * This method temporarily sets the channel mask, executes the operation,
      * and then restores the previous channel configuration.
-     * 
+     *
      * @param channels List of channels to enable during the operation
      * @param operation The operation to execute
      * @return The result of the operation
@@ -348,7 +373,7 @@ open class TCA9548Multiplexer(
     /**
      * Scan a specific channel for I2C devices.
      * This method temporarily switches to the specified channel and scans for devices.
-     * 
+     *
      * @param channel The channel to scan (0 to maxChannels-1)
      * @param config Scan configuration options
      * @return List of detected devices on the channel
@@ -377,7 +402,7 @@ open class TCA9548Multiplexer(
             // Filter out the multiplexer itself from results and assign correct channel
             val channelDevices = detectedDevices
                 .filter { it.address != multiplexerAddress }
-                .map { device -> 
+                .map { device ->
                     DeviceInfo(device.address, channel, device.deviceType)
                 }
             
@@ -402,7 +427,7 @@ open class TCA9548Multiplexer(
      * Scan all channels for I2C devices.
      * This method scans each channel sequentially and returns a comprehensive map.
      * Implements robust error handling to ensure all discoverable devices are found.
-     * 
+     *
      * @param config Scan configuration options
      * @return ChannelDeviceMap containing all detected devices organized by channel
      */
@@ -471,14 +496,14 @@ open class TCA9548Multiplexer(
                 }
             }
         }
-        
+        deviceMap = result
         return result
     }
     
     /**
      * Find which channels contain a specific device address.
      * This method scans all channels looking for the specified address.
-     * 
+     *
      * @param address The I2C address to search for
      * @return List of channel numbers where the device was found
      */
@@ -526,7 +551,7 @@ open class TCA9548Multiplexer(
     
     /**
      * Check if a specific device is present on a specific channel.
-     * 
+     *
      * @param address The I2C address to check
      * @param channel The channel to check
      * @return true if the device responds on the specified channel, false otherwise
@@ -565,7 +590,7 @@ open class TCA9548Multiplexer(
     /**
      * Scan for devices using a more comprehensive approach.
      * This method provides additional options for advanced scanning scenarios.
-     * 
+     *
      * @param channels List of specific channels to scan (if empty, scans all channels)
      * @param config Scan configuration options
      * @return ChannelDeviceMap containing detected devices
@@ -600,7 +625,7 @@ open class TCA9548Multiplexer(
     /**
      * Perform a quick scan to check if any devices are present.
      * This method stops scanning as soon as it finds the first device.
-     * 
+     *
      * @return true if at least one device was found, false if no devices found
      */
     fun hasAnyDevices(): Boolean {
@@ -640,7 +665,7 @@ open class TCA9548Multiplexer(
      * This method scans for devices that are connected directly to the I2C bus,
      * not through multiplexer channels. This is useful for detecting the multiplexer
      * itself and any other devices on the main bus.
-     * 
+     *
      * @param config Scan configuration options
      * @return List of DeviceInfo objects found on the direct bus
      */
@@ -673,7 +698,7 @@ open class TCA9548Multiplexer(
     /**
      * Perform a comprehensive scan that includes both direct bus devices
      * and devices connected through multiplexer channels.
-     * 
+     *
      * @param config Scan configuration options
      * @return ComprehensiveScanResult containing both direct and multiplexed devices
      */
@@ -697,7 +722,7 @@ open class TCA9548Multiplexer(
     /**
      * Get an i2cdetect-style formatted table for the direct bus.
      * This shows what would be visible with a standard i2cdetect command.
-     * 
+     *
      * @return Formatted table string
      */
     fun getDirectBusTable(): String {
@@ -714,7 +739,7 @@ open class TCA9548Multiplexer(
 
 /**
  * Result of a comprehensive scan that includes both direct bus and multiplexed devices.
- * 
+ *
  * @param multiplexerAddress The I2C address of the multiplexer
  * @param directBusDevices Devices found on the direct I2C bus (not through multiplexer)
  * @param channelDeviceMap Devices found on multiplexer channels

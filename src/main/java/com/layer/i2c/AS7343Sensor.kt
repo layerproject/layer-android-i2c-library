@@ -7,8 +7,8 @@ import kotlin.math.min
  * High-level interface for the AS7343 spectral sensor.
  * Provides convenient methods for sensor operations.
  */
-class AS7343Sensor : I2CSensor {
-    
+open class AS7343Sensor : I2CSensor {
+
     /**
      * Constructor for direct I2C connection (no multiplexer).
      * @param busPath The I2C bus path (e.g., "/dev/i2c-0")
@@ -22,8 +22,8 @@ class AS7343Sensor : I2CSensor {
      * @param multiplexerChannel The channel on the multiplexer (0-7)
      */
     constructor(
-        busPath: String, 
-        multiplexer: TCA9548Multiplexer, 
+        busPath: String,
+        multiplexer: TCA9548Multiplexer,
         multiplexerChannel: Int
     ) : super(busPath, multiplexer, multiplexerChannel)
     
@@ -40,7 +40,13 @@ class AS7343Sensor : I2CSensor {
     private val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
     private val REG_CFG1: Int = 0xC6         // Gain configuration register
     
-    companion object {
+    @Volatile
+    open var primaryChannelData: MutableMap<String, Int>? = mutableMapOf()
+    
+    companion object : SensorFactory<I2CSensor> {
+        
+        override fun create(busPath:String): AS7343Sensor = AS7343Sensor(busPath)
+        
         private const val TAG = "AS7343Sensor"
 
         // --- AS7343 Register Addresses (Verified from Datasheet) ---
@@ -137,7 +143,7 @@ class AS7343Sensor : I2CSensor {
      * Sets the register bank.
      * Direct bank setting that bypasses recovery mechanisms.
      * Use this method within recovery functions to avoid infinite loops.
-     * 
+     *
      * @param useBank1 True to select Bank 1, false to select Bank 0
      */
     @Synchronized
@@ -260,7 +266,30 @@ class AS7343Sensor : I2CSensor {
             Log.e(TAG, "Error setting gain for fd=$fileDescriptor: ${e.message}", e)
         }
     }
-
+    
+    override fun getSensorState() = object : ColorSensorState {
+        override val connected = isConnected()
+        override val updateTS = System.currentTimeMillis()
+        override val sensorId = this@AS7343Sensor.toString()
+        override val channelData :  Map<String, Int> = getLatestChannelData()?.toMap()
+            ?: mapOf(
+                "F1" to 0, "F2" to 0, "F3" to 0, "F4" to 0,
+                "F5" to 0, "F6" to 0, "F7" to 0, "F8" to 0
+            )
+    }
+    
+    override fun readDataImpl(): Map<String, Int> {
+        val read = readSpectralDataOnce()
+        if (read.isEmpty()) {
+            return read
+        } else {
+            return this.primaryChannelData!!
+        }
+    }
+    
+    fun getLatestChannelData(): Map<String, Int>? {
+        return this.primaryChannelData
+    }
     /**
      * Reads all spectral channels from the sensor.
      * Handles connect/disconnect internally for a single read operation.
@@ -316,6 +345,7 @@ class AS7343Sensor : I2CSensor {
 
                 if (rawData.isNotEmpty()) {
                     Log.d(TAG, "Spectral data read successful on attempt ${attempt + 1} for fd=$fileDescriptor")
+                    
                     return extractPrimaryChannels(rawData)
                 } else {
                     Log.w(TAG, "Read returned empty data on attempt ${attempt + 1} for fd=$fileDescriptor")
@@ -370,6 +400,9 @@ class AS7343Sensor : I2CSensor {
         primaryChannelKeys.forEachIndexed { index, key ->
             val simpleName = primaryChannelSimpleNames.getOrElse(index) { key } // Use simple name
             primaryMap[simpleName] = rawData[key] ?: 0 // Get value using the register-based key
+            primaryChannelData?.set(simpleName,
+                rawData[key] ?: (primaryChannelData?.get(simpleName) ?: 0)
+            )
         }
         return primaryMap
     }
@@ -393,9 +426,9 @@ class AS7343Sensor : I2CSensor {
                 Log.e(TAG, "Initialization exception cause: ${e.cause?.javaClass?.simpleName} - ${e.cause?.message}")
             }
             // Attempt to power off on failure
-            try { 
+            try {
                 Log.d(TAG, "Attempting to power off sensor after initialization failure on fd=$fileDescriptor")
-                togglePower(false) 
+                togglePower(false)
             } catch (powerOffException: Exception) {
                 Log.w(TAG, "Failed to power off sensor after initialization failure: ${powerOffException.message}")
             }
