@@ -5,9 +5,6 @@ import java.io.IOException
 
 typealias I2CMultiplexer = TCA9548Multiplexer
 
-interface MultiplexerState : SensorState {
-    val deviceSummary : String
-}
 
 /**
  * Base class for TCA9548 I2C multiplexer family.
@@ -97,10 +94,10 @@ open class TCA9548Multiplexer(
     }
     
     override fun getSensorState() = object : MultiplexerState {
-        override val connected = isConnected()
+        override val connected = this@TCA9548Multiplexer.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@TCA9548Multiplexer.toString()
-        override val deviceSummary = "Multiplexer ${busPath} address 0x${multiplexerAddress.toString(16)}: Devices: $(deviceMap.toString()}"
+        override val deviceSummary = "Multiplexer ${busPath} address 0x${multiplexerAddress.toString(16)}: Devices: ${deviceMap.toString()}"
     }
     
     override fun readDataImpl(): Map<String, Int> {

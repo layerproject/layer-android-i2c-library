@@ -1,5 +1,10 @@
 package com.layer.i2c
 
+import java.sql.Date
+import java.time.format.DateTimeFormatter
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.DurationUnit
+
 
 interface SensorFactory<T> {
     fun create(
@@ -14,6 +19,42 @@ interface SensorState {
     val connected: Boolean
     val updateTS: Long
     val sensorId: String
+    
+    public fun timeOfUpdate(updateTS:Long) : String {
+        val date = Date(updateTS)
+        return DateTimeFormatter.ofPattern("HH:mm:ss").format( date.toInstant().atZone(java.time.ZoneId.systemDefault()) )
+    }
+    
+    public fun ageOfUpdate() : String {
+        val duration = System.currentTimeMillis() - updateTS
+        return duration.milliseconds.toString( DurationUnit.SECONDS )
+    }
+}
+
+interface GenericSensorState : SensorState {
+    val stateFields: Map<String, String>
+}
+
+/**
+ * Creates an anonymous object that implemenmts the GenericSensorState interface. This is used
+ * to hold sensor readings at a given point in time. This version of the interface is generic in
+ * the sense that it uses a map to store arbitrary key -> value pairs.
+ */
+fun newSensorState(isConnected : Boolean, newSensorId : String, fields: Map<String, String>?) = object : GenericSensorState {
+    override val connected = isConnected
+    override val updateTS = System.currentTimeMillis()
+    override val sensorId = newSensorId
+    override val stateFields = fields ?: mapOf()
+}
+
+fun newSensorState(sensor: I2CSensor) : SensorState {
+    return sensor.getSensorState()
+}
+
+
+
+interface MultiplexerState : SensorState {
+    val deviceSummary : String
 }
 
 /**

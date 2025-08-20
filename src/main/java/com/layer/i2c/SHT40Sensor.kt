@@ -1,8 +1,6 @@
 package com.layer.i2c
 
 import android.util.Log
-import java.io.IOException
-
 
 /**
  * SHT40 Temperature and Humidity Sensor implementation.

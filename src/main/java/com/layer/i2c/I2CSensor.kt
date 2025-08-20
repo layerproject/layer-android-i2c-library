@@ -43,7 +43,6 @@ abstract class I2CSensor(
         }
     }
     
-    
     // Reference to the bus manager
     private val busManager = I2CBusManager.getInstance()
     
@@ -99,13 +98,13 @@ abstract class I2CSensor(
     }
     
     override fun toString(): String {
-        val TYPE = this.javaClass.toString()
+        val type = this.javaClass.simpleName
         val connected = if (this.connected) "Connected" else "Disconnected"
         val sensorInfo = if (isMultiplexed()) {
             val channel = getSensorMultiplexerChannel()
-            "$TYPE ($busPath Multiplexed Ch$channel) $connected"
+            "$type ($busPath Multiplexed Ch$channel) $connected"
         } else {
-            "$TYPE ($busPath) - $connected"
+            "$type ($busPath) - $connected"
         }
         return sensorInfo
     }
@@ -250,10 +249,11 @@ abstract class I2CSensor(
     
     open var connected: Boolean = false
     open public fun isConnected(): Boolean {
-        connected = when {
-            !(isInitialized && isBusOpen) -> false
-            multiplexer != null && !multiplexer!!.isConnected() -> false
-            else -> true
+        if (multiplexer != null && multiplexer?.isConnected() == false) {
+            connected = false
+        }
+        if (isInitialized && isBusOpen) {
+            connected = true
         }
         return connected
     }
@@ -288,13 +288,10 @@ abstract class I2CSensor(
         
         // If using a multiplexer, connect to it first
         if (multiplexer != null) {
-            if (!multiplexer!!.isReady()) {
+            if (multiplexer?.isReady() == false) {
                 Log.d(TAG, "Multiplexer not ready, attempting to connect...")
-                if (!multiplexer!!.connect()) {
-                    Log.e(
-                        TAG,
-                        "Failed to connect to multiplexer for sensor 0x${sensorAddress.toString(16)}"
-                    )
+                if (multiplexer?.connect() == false) {
+                    Log.e(TAG,"Failed to connect to multiplexer for sensor 0x${sensorAddress.toString(16)}")
                     connected = false
                     return false
                 }
@@ -304,10 +301,7 @@ abstract class I2CSensor(
         
         // Check if this address is already in use on this bus
         if (busManager.isAddressInUse(effectiveBusPath, sensorAddress)) {
-            Log.e(
-                TAG,
-                "Address 0x${sensorAddress.toString(16)} already in use on bus $effectiveBusPath"
-            )
+            Log.e(TAG, "Address 0x${sensorAddress.toString(16)} already in use on bus $effectiveBusPath")
             connected = false
             return false
         }
