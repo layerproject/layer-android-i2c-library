@@ -3,14 +3,20 @@ package com.layer.i2c
 import android.util.Log
 import java.io.IOException
 
+
+interface OnDataReceivedListener {
+    fun onDataReceived(sensor: I2CSensor, channelData:  Map<String, Any>)
+}
+
+
 /**
  * Base class for all I2C sensors.
  * Provides common I2C communication methods and management.
  */
 abstract class I2CSensor(
     val busPath: String,
-    protected val multiplexer: TCA9548Multiplexer? = null,
-    protected val multiplexerChannel: Int? = null
+    private var multiplexer: TCA9548Multiplexer? = null,
+    private var multiplexerChannel: Int? = null,
 ) {
     companion object {
         protected const val TAG = "I2CSensor"
@@ -54,6 +60,58 @@ abstract class I2CSensor(
     // Each sensor type must specify its own I2C address
     protected abstract val sensorAddress: Int
     
+    private var listeners: MutableList<OnDataReceivedListener> = mutableListOf()
+    
+    public fun addListener(listener: OnDataReceivedListener): Boolean {
+        return listeners.add(listener)
+    }
+    
+    public fun removeListener(listener: OnDataReceivedListener): Boolean {
+        return listeners.remove(listener)
+    }
+    
+    public fun clearListeners() {
+        listeners.clear()
+    }
+    
+    protected fun notifyListeners(data: Map<String, Any>) : Map<String, Any> {
+        for (l in listeners) {
+            l.onDataReceived(this, data)
+        }
+        return data
+    }
+    
+    open fun deviceUniqueId(): String {
+        val address = getAddress()
+        val deviceId = if (isMultiplexed()) {
+            val channel = getSensorMultiplexerChannel()
+            "$busPath:$channel:$address"
+        } else {
+            "$busPath:*:$address"
+        }
+        return deviceId;
+    }
+    
+    fun setMultiplexer(multiplexer: TCA9548Multiplexer, channel: Int) {
+        this.multiplexer = multiplexer
+        this.multiplexerChannel = channel
+    }
+    
+    override fun toString(): String {
+        val type = this.javaClass.simpleName
+        val connected = if (this.connected) "Connected" else "Disconnected"
+        val sensorInfo = if (isMultiplexed()) {
+            val channel = getSensorMultiplexerChannel()
+            "$type ($busPath Multiplexed Ch$channel) $connected"
+        } else {
+            "$type ($busPath) - $connected"
+        }
+        return sensorInfo
+    }
+    
+    
+    public fun getAddress(): Int = sensorAddress
+    
     /**
      * Get the multiplexer channel this sensor is connected to.
      * @return The multiplexer channel (0-7) or null if directly connected
@@ -81,8 +139,8 @@ abstract class I2CSensor(
             throw IllegalArgumentException("Multiplexer must be specified when using a multiplexer channel")
         }
         if (multiplexer != null && multiplexerChannel != null) {
-            if (multiplexerChannel < 0 || multiplexerChannel >= multiplexer.maxChannels) {
-                throw IllegalArgumentException("Multiplexer channel $multiplexerChannel is out of range (0-${multiplexer.maxChannels - 1})")
+            if (multiplexerChannel!! < 0 || multiplexerChannel!! >= multiplexer!!.maxChannels) {
+                throw IllegalArgumentException("Multiplexer channel $multiplexerChannel is out of range (0-${multiplexer!!.maxChannels - 1})")
             }
         }
     }
@@ -93,6 +151,16 @@ abstract class I2CSensor(
      */
     protected abstract fun initializeSensor(): Boolean
     
+    public abstract fun readDataImpl(): Map<String, Any>
+    public fun readData(): Map<String, Any> {
+        return notifyListeners(readDataImpl())
+    }
+    
+    public open fun getSensorState() = object : SensorState {
+        override val connected = isConnected()
+        override val updateTS = System.currentTimeMillis()
+        override val sensorId = this@I2CSensor.toString()
+    }
     
     /**
      * Checks if the sensor is connected *and* initialized.
@@ -112,22 +180,23 @@ abstract class I2CSensor(
             }
         }
         
-        return isInitialized && isBusOpen && fileDescriptor >= 0
+        connected = isInitialized && isBusOpen && fileDescriptor >= 0
+        return connected
     }
-
+    
     /**
      * Gets the effective bus path for this sensor, including multiplexer channel if applicable.
      * This ensures multiplexed sensors have unique identities.
      * @return Bus path with channel info for multiplexed sensors, plain path for direct connections
      */
-    private fun getEffectiveBusPath(): String {
+    public fun getEffectiveBusPath(): String {
         return if (multiplexer != null && multiplexerChannel != null) {
             "${busPath}:ch${multiplexerChannel}"
         } else {
             busPath
         }
     }
-
+    
     /**
      * Opens an I2C connection to the sensor on the specified bus.
      * @return File descriptor if successful, -1 if failed
@@ -136,11 +205,19 @@ abstract class I2CSensor(
         val effectiveBusPath = getEffectiveBusPath()
         val fd = busManager.openBus(effectiveBusPath, sensorAddress)
         if (fd < 0) {
-            Log.e(TAG, "Failed to open I2C bus $effectiveBusPath for address 0x${sensorAddress.toString(16)}")
+            Log.e(
+                TAG,
+                "Failed to open I2C bus $effectiveBusPath for address 0x${sensorAddress.toString(16)}"
+            )
             isBusOpen = false
             return false
         } else {
-            Log.d(TAG, "Successfully opened I2C bus $effectiveBusPath for address 0x${sensorAddress.toString(16)}")
+            Log.d(
+                TAG,
+                "Successfully opened I2C bus $effectiveBusPath for address 0x${
+                    sensorAddress.toString(16)
+                }"
+            )
             isBusOpen = true
             fileDescriptor = fd
             
@@ -150,7 +227,7 @@ abstract class I2CSensor(
             return true
         }
     }
-
+    
     /**
      * Closes an I2C connection.
      */
@@ -165,8 +242,22 @@ abstract class I2CSensor(
             busManager.closeBus(effectiveBusPath, sensorAddress)
             isBusOpen = false
         }
+        connected = false
+        clearListeners()
     }
-
+    
+    
+    open var connected: Boolean = false
+    open public fun isConnected(): Boolean {
+        if (multiplexer != null && multiplexer?.isConnected() == false) {
+            connected = false
+        }
+        if (isInitialized && isBusOpen) {
+            connected = true
+        }
+        return connected
+    }
+    
     /**
      * Opens a connection to the sensor and initializes it.
      * @return true if connection and initialization were successful, false otherwise
@@ -174,26 +265,34 @@ abstract class I2CSensor(
     @Synchronized
     open fun connect(): Boolean {
         if (isInitialized && isBusOpen) {
-            Log.d(TAG, "Sensor on $busPath for address 0x${sensorAddress.toString(16)} already connected and initialized.")
+            Log.d(
+                TAG,
+                "Sensor on $busPath for address 0x${sensorAddress.toString(16)} already connected and initialized."
+            )
+            connected = true
             return true
         }
-
+        
         // Already open but not initialized? Close first.
         if (isBusOpen) {
             Log.w(TAG, "Sensor fd already open but not initialized. Re-opening.")
             closeDevice()
             fileDescriptor = -1
         }
-
+        
         val effectiveBusPath = getEffectiveBusPath()
-        Log.d(TAG, "Connecting to sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)}...")
+        Log.d(
+            TAG,
+            "Connecting to sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)}..."
+        )
         
         // If using a multiplexer, connect to it first
         if (multiplexer != null) {
-            if (!multiplexer.isReady()) {
+            if (multiplexer?.isReady() == false) {
                 Log.d(TAG, "Multiplexer not ready, attempting to connect...")
-                if (!multiplexer.connect()) {
-                    Log.e(TAG, "Failed to connect to multiplexer for sensor 0x${sensorAddress.toString(16)}")
+                if (multiplexer?.connect() == false) {
+                    Log.e(TAG,"Failed to connect to multiplexer for sensor 0x${sensorAddress.toString(16)}")
+                    connected = false
                     return false
                 }
             }
@@ -203,31 +302,48 @@ abstract class I2CSensor(
         // Check if this address is already in use on this bus
         if (busManager.isAddressInUse(effectiveBusPath, sensorAddress)) {
             Log.e(TAG, "Address 0x${sensorAddress.toString(16)} already in use on bus $effectiveBusPath")
+            connected = false
             return false
         }
         
         if (!openDevice()) {
-            Log.e(TAG, "Failed to open sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)}.")
+            Log.e(
+                TAG,
+                "Failed to open sensor on $effectiveBusPath for address 0x${
+                    sensorAddress.toString(16)
+                }."
+            )
             isInitialized = false
             isBusOpen = false
+            connected = false
             return false
         }
-
-        Log.d(TAG, "Sensor opened (fd=$fileDescriptor) for address 0x${sensorAddress.toString(16)}. Initializing...")
+        
+        Log.d(
+            TAG,
+            "Sensor opened (fd=$fileDescriptor) for address 0x${sensorAddress.toString(16)}. Initializing..."
+        )
         isInitialized = initializeSensor()
-
+        
         if (!isInitialized) {
-            Log.e(TAG, "Failed to initialize sensor on $effectiveBusPath for address 0x${sensorAddress.toString(16)} (fd=$fileDescriptor). Closing.")
+            Log.e(
+                TAG,
+                "Failed to initialize sensor on $effectiveBusPath for address 0x${
+                    sensorAddress.toString(16)
+                } (fd=$fileDescriptor). Closing."
+            )
             closeDevice()
             fileDescriptor = -1
             isBusOpen = false
+            connected = false
             return false
         }
-
+        
         Log.i(TAG, "Sensor on $effectiveBusPath connected and initialized successfully.")
+        connected = true
         return true
     }
-
+    
     /**
      * Closes the connection to the sensor.
      */
@@ -235,7 +351,10 @@ abstract class I2CSensor(
     open fun disconnect() {
         if (isBusOpen) {
             val effectiveBusPath = getEffectiveBusPath()
-            Log.d(TAG, "Disconnecting sensor on $effectiveBusPath for address $sensorAddress (fd=$fileDescriptor)...")
+            Log.d(
+                TAG,
+                "Disconnecting sensor on $effectiveBusPath for address $sensorAddress (fd=$fileDescriptor)..."
+            )
             closeDevice()
             fileDescriptor = -1
             isBusOpen = false
@@ -246,14 +365,15 @@ abstract class I2CSensor(
             val effectiveBusPath = getEffectiveBusPath()
             Log.d(TAG, "Sensor on $effectiveBusPath already disconnected.")
         }
+        connected = false
     }
-
+    
     /**
      * Switches the I2C bus to this device's address only if needed.
      * This must be called before any I/O operations when multiple devices
      * share the same I2C bus/file descriptor.
      * If a multiplexer is configured, it also switches to the correct channel.
-     * 
+     *
      * @return true if the switch was successful, false otherwise
      */
     protected fun switchToDevice(): Boolean {
@@ -267,18 +387,29 @@ abstract class I2CSensor(
         synchronized(lock) {
             // If using a multiplexer, ensure the correct channel is selected first
             if (multiplexer != null && multiplexerChannel != null) {
-                if (!multiplexer.isReady()) {
-                    Log.e(TAG, "Multiplexer not ready for sensor at address 0x${sensorAddress.toString(16)}")
+                if (!multiplexer!!.isReady()) {
+                    Log.e(
+                        TAG,
+                        "Multiplexer not ready for sensor at address 0x${sensorAddress.toString(16)}"
+                    )
                     return false
                 }
                 
                 // Switch to the multiplexer and select our channel
-                if (!multiplexer.isChannelEnabled(multiplexerChannel)) {
+                if (!multiplexer!!.isChannelEnabled(multiplexerChannel!!)) {
                     try {
-                        multiplexer.selectChannel(multiplexerChannel)
-                        Log.d(TAG, "Selected multiplexer channel $multiplexerChannel for sensor 0x${sensorAddress.toString(16)}")
+                        multiplexer!!.selectChannel(multiplexerChannel!!)
+                        Log.d(
+                            TAG,
+                            "Selected multiplexer channel $multiplexerChannel for sensor 0x${
+                                sensorAddress.toString(16)
+                            }"
+                        )
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to select multiplexer channel $multiplexerChannel: ${e.message}")
+                        Log.e(
+                            TAG,
+                            "Failed to select multiplexer channel $multiplexerChannel: ${e.message}"
+                        )
                         return false
                     }
                 }
@@ -294,7 +425,10 @@ abstract class I2CSensor(
             // We need to switch device
             val result = I2cNative.switchDeviceAddress(fileDescriptor, sensorAddress)
             if (result < 0) {
-                Log.e(TAG, "Failed to switch to device address 0x${sensorAddress.toString(16)} on fd=$fileDescriptor")
+                Log.e(
+                    TAG,
+                    "Failed to switch to device address 0x${sensorAddress.toString(16)} on fd=$fileDescriptor"
+                )
                 return false
             }
             
@@ -303,7 +437,7 @@ abstract class I2CSensor(
             return true
         }
     }
-
+    
     // --- I2C Primitive Helpers ---
     
     /**
@@ -325,7 +459,8 @@ abstract class I2CSensor(
             
             val result = I2cNative.readWord(fileDescriptor, register)
             if (result < 0) {
-                val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+                val errorMessage =
+                    "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
                 Log.e(TAG, errorMessage)
                 throw IOException(errorMessage)
             }
@@ -348,33 +483,55 @@ abstract class I2CSensor(
             
             val result = I2cNative.readWord(fileDescriptor, register)
             if (result < 0) {
-                val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+                val errorMessage =
+                    "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
                 Log.e(TAG, errorMessage)
                 
                 // If this sensor supports recovery (spectral sensors) and we're not already in recovery, attempt it
                 if (this is AS7343Sensor && !isRecovering) {
-                    Log.w(TAG, "Attempting sensor recovery due to I2C read error on fd=$fileDescriptor")
+                    Log.w(
+                        TAG,
+                        "Attempting sensor recovery due to I2C read error on fd=$fileDescriptor"
+                    )
                     try {
                         isRecovering = true
-                        val recovered = (this as AS7343Sensor).recoverSensor()
+                        val recovered = this.recoverSensor()
                         if (recovered) {
-                            Log.i(TAG, "Sensor recovery successful, retrying read operation on fd=$fileDescriptor")
+                            Log.i(
+                                TAG,
+                                "Sensor recovery successful, retrying read operation on fd=$fileDescriptor"
+                            )
                             // Retry the read operation once after successful recovery
                             if (!switchToDevice()) {
-                                throw IOException("Failed to switch to device after recovery 0x${sensorAddress.toString(16)}")
+                                throw IOException(
+                                    "Failed to switch to device after recovery 0x${
+                                        sensorAddress.toString(
+                                            16
+                                        )
+                                    }"
+                                )
                             }
                             val retryResult = I2cNative.readWord(fileDescriptor, register)
                             if (retryResult >= 0) {
-                                Log.i(TAG, "Read operation successful after recovery on fd=$fileDescriptor")
+                                Log.i(
+                                    TAG,
+                                    "Read operation successful after recovery on fd=$fileDescriptor"
+                                )
                                 return retryResult and 0xFF
                             } else {
-                                Log.e(TAG, "Read operation still failed after recovery on fd=$fileDescriptor")
+                                Log.e(
+                                    TAG,
+                                    "Read operation still failed after recovery on fd=$fileDescriptor"
+                                )
                             }
                         } else {
                             Log.e(TAG, "Sensor recovery failed on fd=$fileDescriptor")
                         }
                     } catch (recoveryException: Exception) {
-                        Log.e(TAG, "Exception during sensor recovery on fd=$fileDescriptor: ${recoveryException.message}")
+                        Log.e(
+                            TAG,
+                            "Exception during sensor recovery on fd=$fileDescriptor: ${recoveryException.message}"
+                        )
                     } finally {
                         isRecovering = false
                     }
@@ -385,7 +542,7 @@ abstract class I2CSensor(
             return result and 0xFF
         }
     }
-
+    
     protected fun writeByteReg(register: Int, value: Int) {
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
@@ -401,11 +558,17 @@ abstract class I2CSensor(
             
             val result = I2cNative.writeByte(fileDescriptor, register, value)
             if (result < 0) {
-                throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result")
+                throw IOException(
+                    "I2C Write Error on fd=$fileDescriptor, reg=0x${
+                        register.toString(
+                            16
+                        )
+                    }, value=0x${value.toString(16)}, code=$result"
+                )
             }
         }
     }
-
+    
     protected fun writeWordReg(lsbRegister: Int, value: Int) {
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
@@ -425,12 +588,24 @@ abstract class I2CSensor(
             // Write LSB first, then MSB - no need to switch device again
             val result1 = I2cNative.writeByte(fileDescriptor, lsbRegister, lsb)
             if (result1 < 0) {
-                throw IOException("I2C Write LSB Error on fd=$fileDescriptor, reg=0x${lsbRegister.toString(16)}, value=0x${lsb.toString(16)}, code=$result1")
+                throw IOException(
+                    "I2C Write LSB Error on fd=$fileDescriptor, reg=0x${
+                        lsbRegister.toString(
+                            16
+                        )
+                    }, value=0x${lsb.toString(16)}, code=$result1"
+                )
             }
             
             val result2 = I2cNative.writeByte(fileDescriptor, lsbRegister + 1, msb)
             if (result2 < 0) {
-                throw IOException("I2C Write MSB Error on fd=$fileDescriptor, reg=0x${(lsbRegister + 1).toString(16)}, value=0x${msb.toString(16)}, code=$result2")
+                throw IOException(
+                    "I2C Write MSB Error on fd=$fileDescriptor, reg=0x${
+                        (lsbRegister + 1).toString(
+                            16
+                        )
+                    }, value=0x${msb.toString(16)}, code=$result2"
+                )
             }
         }
     }
@@ -466,9 +641,14 @@ abstract class I2CSensor(
         }
         
         if (!isInitialized) {
-            Log.d(TAG, "enableBitDirect called during initialization (fd=$fileDescriptor, reg=0x${register.toString(16)}, bit=$bit)")
+            Log.d(
+                TAG,
+                "enableBitDirect called during initialization (fd=$fileDescriptor, reg=0x${
+                    register.toString(16)
+                }, bit=$bit)"
+            )
         }
-
+        
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
@@ -476,16 +656,19 @@ abstract class I2CSensor(
             if (!switchToDevice()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-
+            
             // Read current value using direct method (already performs device switching)
             val regValue = readByteRegDirect(register)
             val bitMask = (1 shl bit)
             val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
-
+            
             if (newValue != regValue) {
                 val result = I2cNative.writeByte(fileDescriptor, register, newValue)
                 if (result < 0) {
-                    val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result"
+                    val errorMessage =
+                        "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
+                            newValue.toString(16)
+                        }, code=$result"
                     Log.e(TAG, errorMessage)
                     throw IOException(errorMessage)
                 }
@@ -503,9 +686,14 @@ abstract class I2CSensor(
         }
         
         if (!isInitialized) {
-            Log.d(TAG, "enableBit called during initialization (fd=$fileDescriptor, reg=0x${register.toString(16)}, bit=$bit)")
+            Log.d(
+                TAG,
+                "enableBit called during initialization (fd=$fileDescriptor, reg=0x${
+                    register.toString(16)
+                }, bit=$bit)"
+            )
         }
-
+        
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
@@ -513,21 +701,27 @@ abstract class I2CSensor(
             if (!switchToDevice()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-
+            
             // Read current value (already performs device switching)
             val regValue = readByteReg(register)
             val bitMask = (1 shl bit)
             val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
-
+            
             if (newValue != regValue) {
                 val result = I2cNative.writeByte(fileDescriptor, register, newValue)
                 if (result < 0) {
-                    throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+                    throw IOException(
+                        "I2C Write Error on fd=$fileDescriptor, reg=0x${
+                            register.toString(
+                                16
+                            )
+                        }, value=0x${newValue.toString(16)}, code=$result"
+                    )
                 }
             }
         }
     }
-
+    
     protected fun setRegisterBits(register: Int, shift: Int, width: Int, value: Int) {
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
@@ -548,7 +742,13 @@ abstract class I2CSensor(
             
             val result = I2cNative.writeByte(fileDescriptor, register, newValue)
             if (result < 0) {
-                throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+                throw IOException(
+                    "I2C Write Error on fd=$fileDescriptor, reg=0x${
+                        register.toString(
+                            16
+                        )
+                    }, value=0x${newValue.toString(16)}, code=$result"
+                )
             }
         }
     }
@@ -562,14 +762,14 @@ abstract class I2CSensor(
             clearDeviceMapping(fd)
         }
     }
-
+    
     // --- Transaction Support for Atomic Multi-Step Operations ---
     
     /**
      * Executes a block of I2C operations as an atomic transaction.
      * Holds the file descriptor lock for the entire operation to prevent
      * race conditions when multiple sensors share the same I2C bus.
-     * 
+     *
      * @param operation The block of I2C operations to execute atomically
      * @return The result of the operation block
      */
@@ -585,11 +785,11 @@ abstract class I2CSensor(
             return operation()
         }
     }
-
+    
     /**
      * Internal method for I2C byte register reads within a transaction.
      * Skips device switching since it's already done at transaction start.
-     * 
+     *
      * @param register The register address to read from
      * @return The byte value read from the register
      */
@@ -601,17 +801,18 @@ abstract class I2CSensor(
         // NO switchToDevice() call - transaction already switched
         val result = I2cNative.readWord(fileDescriptor, register)
         if (result < 0) {
-            val errorMessage = "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
+            val errorMessage =
+                "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
             Log.e(TAG, errorMessage)
             throw IOException(errorMessage)
         }
         return result and 0xFF
     }
-
+    
     /**
      * Internal method for I2C byte register writes within a transaction.
      * Skips device switching since it's already done at transaction start.
-     * 
+     *
      * @param register The register address to write to
      * @param value The byte value to write
      */
@@ -623,16 +824,19 @@ abstract class I2CSensor(
         // NO switchToDevice() call - transaction already switched  
         val result = I2cNative.writeByte(fileDescriptor, register, value)
         if (result < 0) {
-            val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${value.toString(16)}, code=$result"
+            val errorMessage =
+                "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
+                    value.toString(16)
+                }, code=$result"
             Log.e(TAG, errorMessage)
             throw IOException(errorMessage)
         }
     }
-
+    
     /**
      * Internal method for I2C word register writes within a transaction.
      * Skips device switching since it's already done at transaction start.
-     * 
+     *
      * @param lsbRegister The LSB register address to write to
      * @param value The 16-bit value to write (LSB first, then MSB)
      */
@@ -647,19 +851,31 @@ abstract class I2CSensor(
         // Write LSB first, then MSB - no need to switch device again within transaction
         val result1 = I2cNative.writeByte(fileDescriptor, lsbRegister, lsb)
         if (result1 < 0) {
-            throw IOException("I2C Write LSB Error on fd=$fileDescriptor, reg=0x${lsbRegister.toString(16)}, value=0x${lsb.toString(16)}, code=$result1")
+            throw IOException(
+                "I2C Write LSB Error on fd=$fileDescriptor, reg=0x${
+                    lsbRegister.toString(
+                        16
+                    )
+                }, value=0x${lsb.toString(16)}, code=$result1"
+            )
         }
         
         val result2 = I2cNative.writeByte(fileDescriptor, lsbRegister + 1, msb)
         if (result2 < 0) {
-            throw IOException("I2C Write MSB Error on fd=$fileDescriptor, reg=0x${(lsbRegister + 1).toString(16)}, value=0x${msb.toString(16)}, code=$result2")
+            throw IOException(
+                "I2C Write MSB Error on fd=$fileDescriptor, reg=0x${
+                    (lsbRegister + 1).toString(
+                        16
+                    )
+                }, value=0x${msb.toString(16)}, code=$result2"
+            )
         }
     }
-
+    
     /**
      * Internal method for bit manipulation within a transaction.
      * Skips device switching since it's already done at transaction start.
-     * 
+     *
      * @param register The register address
      * @param bit The bit position (0-7)
      * @param on Whether to set (true) or clear (false) the bit
@@ -668,26 +884,29 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-
+        
         // Read current value using transaction method
         val regValue = readByteRegTransaction(register)
         val bitMask = (1 shl bit)
         val newValue = if (on) regValue or bitMask else regValue and bitMask.inv()
-
+        
         if (newValue != regValue) {
             val result = I2cNative.writeByte(fileDescriptor, register, newValue)
             if (result < 0) {
-                val errorMessage = "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result"
+                val errorMessage =
+                    "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
+                        newValue.toString(16)
+                    }, code=$result"
                 Log.e(TAG, errorMessage)
                 throw IOException(errorMessage)
             }
         }
     }
-
+    
     /**
      * Internal method for setting specific bits in a register within a transaction.
      * Skips device switching since it's already done at transaction start.
-     * 
+     *
      * @param register The register address
      * @param shift The bit position to start at
      * @param width The number of bits to set
@@ -705,7 +924,13 @@ abstract class I2CSensor(
         
         val result = I2cNative.writeByte(fileDescriptor, register, newValue)
         if (result < 0) {
-            throw IOException("I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${newValue.toString(16)}, code=$result")
+            throw IOException(
+                "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
+                    newValue.toString(
+                        16
+                    )
+                }, code=$result"
+            )
         }
     }
     

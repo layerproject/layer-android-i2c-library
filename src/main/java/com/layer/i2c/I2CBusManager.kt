@@ -32,6 +32,9 @@ class I2CBusManager private constructor() {
     // Map of file descriptors to locks for fd-level synchronization
     private val fdLockMap = ConcurrentHashMap<Int, Any>()
     
+    // A singleton instance if there is a multiplexer operating on this bus.
+    private val multiplexerMap = ConcurrentHashMap<String, I2CMultiplexer>()
+    
     /**
      * Extracts the physical bus path from an effective bus path.
      * For multiplexed sensors, this removes the channel suffix.

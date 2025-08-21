@@ -4,7 +4,7 @@ import android.util.Log
 
 /**
  * Represents information about a detected I2C device.
- * 
+ *
  * @param address The 7-bit I2C address of the device (0x08-0x77)
  * @param channel The multiplexer channel where the device was found (0-7 for TCA9548)
  * @param deviceType Optional device type identification (if detectable)
@@ -31,7 +31,7 @@ data class DeviceInfo(
 
 /**
  * Represents the results of scanning I2C devices across multiplexer channels.
- * 
+ *
  * @param multiplexerAddress The I2C address of the multiplexer that was scanned
  * @param channelDevices Map of channel number to list of detected devices
  * @param scanTime Timestamp when the scan was performed
@@ -123,7 +123,7 @@ data class ChannelDeviceMap(
 
 /**
  * Configuration options for I2C device scanning.
- * 
+ *
  * @param startAddress First address to scan (inclusive, default 0x08)
  * @param endAddress Last address to scan (inclusive, default 0x77)
  * @param skipAddresses List of addresses to skip during scanning
@@ -197,6 +197,23 @@ object CommonI2CDevices {
         0x76 to "TCA9548 I2C Multiplexer / BMP280 Pressure Sensor",
         0x77 to "TCA9548 I2C Multiplexer / BMP280 Pressure Sensor"
     )
+    
+    private val knownDeviceClasses: Map<Int, SensorFactory<I2CSensor>> = mapOf(
+        0x39 to AS7343Sensor,
+        0x44 to SHT40Sensor,
+        0x70 to TCA9548Multiplexer,
+        0x71 to TCA9548Multiplexer,
+        0x72 to TCA9548Multiplexer,
+        0x73 to TCA9548Multiplexer,
+        0x74 to TCA9548Multiplexer,
+        0x75 to TCA9548Multiplexer,
+        0x76 to TCA9548Multiplexer,
+        0x77 to TCA9548Multiplexer
+    )
+    
+    fun getDeviceClass(address: Int): SensorFactory<I2CSensor>? {
+        return knownDeviceClasses[address]
+    }
     
     /**
      * Get the device type for a known I2C address.
