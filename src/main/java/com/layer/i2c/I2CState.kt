@@ -1,10 +1,12 @@
 package com.layer.i2c
 
+import androidx.compose.runtime.MutableState
 import java.sql.Date
 import java.time.format.DateTimeFormatter
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.DurationUnit
-
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 
 interface SensorFactory<T> {
     fun create(
@@ -31,8 +33,12 @@ interface SensorState {
     }
 }
 
-interface GenericSensorState : SensorState {
-    val stateFields: Map<String, String>
+interface GenericSensorState<T> : SensorState {
+    val stateFields: Map<String, MutableState<T>>
+}
+
+interface StringSensorState : GenericSensorState<String> {
+
 }
 
 /**
@@ -40,11 +46,11 @@ interface GenericSensorState : SensorState {
  * to hold sensor readings at a given point in time. This version of the interface is generic in
  * the sense that it uses a map to store arbitrary key -> value pairs.
  */
-fun newSensorState(isConnected : Boolean, newSensorId : String, fields: Map<String, String>?) = object : GenericSensorState {
+fun newSensorState(isConnected : Boolean, newSensorId : String, fields: Map<String, String>?) = object : GenericSensorState<String> {
     override val connected = isConnected
     override val updateTS = System.currentTimeMillis()
     override val sensorId = newSensorId
-    override val stateFields = fields ?: mapOf()
+    override val stateFields = fields?.map { (key, value) -> key to mutableStateOf(value) }!!.toMap()
 }
 
 fun newSensorState(sensor: I2CSensor) : SensorState {

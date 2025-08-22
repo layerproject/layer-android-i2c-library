@@ -81,6 +81,9 @@ abstract class I2CSensor(
         return data
     }
     
+    /**
+     * A string that uniquely identifies an i2c devices by it's busPath, multiplexer channel and i2c saddress.
+     */
     open fun deviceUniqueId(): String {
         val address = getAddress()
         val deviceId = if (isMultiplexed()) {
@@ -248,7 +251,7 @@ abstract class I2CSensor(
     
     
     open var connected: Boolean = false
-    open public fun isConnected(): Boolean {
+    open fun isConnected(): Boolean {
         if (multiplexer != null && multiplexer?.isConnected() == false) {
             connected = false
         }
