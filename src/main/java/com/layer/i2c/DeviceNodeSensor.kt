@@ -38,6 +38,7 @@ open class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDispat
         val TAG = "DeviceNodeSensors"
     }
     
+
     
     fun getSensorState() = object : GenericSensorState<T> {
         override val connected = isConnected()
@@ -52,8 +53,8 @@ open class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDispat
    
 }
 
-class GPUTemperatureDeviceNodeSensor(initialValue: String = "", context : CoroutineDispatcher = Dispatchers.IO)  : DeviceNodeSensor<String>(initialValue,context)  {
-
+open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, context : CoroutineDispatcher = Dispatchers.IO)  : DeviceNodeSensor<String>(initialValue, context)  {
+    val zones = zoneIds.map { i -> "/sys/class/thermal/thermal_zone$i/temp" }
     /**
      * Starts monitoring device temperature
      */
@@ -61,15 +62,8 @@ class GPUTemperatureDeviceNodeSensor(initialValue: String = "", context : Corout
     override fun start() {
         this.job = CoroutineScope(context).launch {
             // GPU thermal zones, determined by probing /sys/class/thermal/thermal_zone*/type
-            val zones = listOf(
-                "/sys/class/thermal/thermal_zone63/temp",
-                "/sys/class/thermal/thermal_zone64/temp",
-                "/sys/class/thermal/thermal_zone65/temp",
-                "/sys/class/thermal/thermal_zone66/temp",
-                "/sys/class/thermal/thermal_zone67/temp",
-                "/sys/class/thermal/thermal_zone68/temp",
-                "/sys/class/thermal/thermal_zone69/temp",
-            )
+            
+
             
             fun err(error : String) {
                 if (fields.containsKey("error")){
@@ -128,4 +122,8 @@ class GPUTemperatureDeviceNodeSensor(initialValue: String = "", context : Corout
             }
         }
     }
+}
+
+class GPUZoneSensor(context : CoroutineDispatcher = Dispatchers.IO) : ThermalZoneSensor("", 63 .. 69, context ) {
+
 }
