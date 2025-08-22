@@ -82,7 +82,7 @@ class I2CSensorBus(val busPath: String) {
                     }
                 } catch (e : Exception) {
                     Log.e(
-                        "SensorTest",
+                        TAG,
                         "Error connecting to ${sensor.getAddress()} on ${this.busPath}: ${e.message}"
                     )
                 }
@@ -110,7 +110,7 @@ class I2CSensorBus(val busPath: String) {
                     if (multiplexer != null && multiplexer!!.getAddress() != muxDevice.address) {
                         val oldAddress = multiplexer?.getAddress()
                         val newAddress = muxDevice.address
-                        Log.w("I2C", "Multiple multiplexers on $busPath, replacing old address: $oldAddress with new address: $newAddress")
+                        Log.w(TAG, "Multiple multiplexers on $busPath, replacing old address: $oldAddress with new address: $newAddress")
                         multiplexer?.disableAllChannels()
                         tryDisconnectSafely(multiplexer)
                         multiplexer = null
@@ -133,7 +133,7 @@ class I2CSensorBus(val busPath: String) {
                 }
             }
         } catch (e : Exception) {
-            Log.e("SensorTest", "Failed to scan $busPath: ${e.message}")
+            Log.e(TAG, "Failed to scan $busPath: ${e.message}")
         }
         return allDevices
     }
@@ -149,7 +149,7 @@ class I2CSensorBus(val busPath: String) {
         try {
             sensor?.disconnect()
         } catch (e : Exception) {
-            Log.e("Layer", "Error disconnecting sensor: ${e.message}")
+            Log.e(TAG, "Error disconnecting sensor: ${e.message}")
         }
     }
     
@@ -172,20 +172,20 @@ class I2CSensorBus(val busPath: String) {
                             try {
                                 val connected = sensor.connect()
                                 if (!connected) {
-                                    Log.e("Layer", String.format("Sensor at %s is not connected", sensor.busPath))
+                                    Log.e(TAG, String.format("Sensor at %s is not connected", sensor.busPath))
                                     reconnectList.add(sensor)
                                 }
                             } catch (e : Exception) {
                                 reconnectList.add(sensor)
                                 errorCounter++
-                                Log.e("Layer", "Error reading from sensor: ${e.message}")
+                                Log.e(TAG, "Error reading from sensor: ${e.message}")
                             }
                         }
                         if (sensor.isReady()) {
                             val data = sensor.readData()
                             if (data.isEmpty()) {
                                 Log.e(
-                                    "Layer",
+                                    TAG,
                                     String.format(
                                         "Sensor at %s returned empty data, marking as disconnected",
                                         sensor.busPath
@@ -196,7 +196,7 @@ class I2CSensorBus(val busPath: String) {
                                 tryDisconnectSafely(sensor)
                             } else if (data.containsKey("ERROR")) {
                                 Log.e(
-                                    "Layer",
+                                    TAG,
                                     String.format(
                                         "Sensor at %s returned error, marking as disconnected",
                                         sensor.busPath
@@ -209,13 +209,13 @@ class I2CSensorBus(val busPath: String) {
                             
                         }
                     } catch (e : IOException) {
-                        Log.e("Layer", "Error reading from sensor0: ${e.message}")
+                        Log.e(TAG, "Error reading from sensor0: ${e.message}")
                         // Disconnect to ensure clean reconnection later
                         errorCounter++
                         tryDisconnectSafely(sensor)
                         reconnectList.add(sensor)
                     } catch (e : Exception) {
-                        Log.e("Layer", "Unexpected error reading from sensor0: ${e.message}")
+                        Log.e(TAG, "Unexpected error reading from sensor0: ${e.message}")
                         errorCounter++
                         reconnectList.add(sensor)
                         tryDisconnectSafely(sensor)
@@ -225,7 +225,7 @@ class I2CSensorBus(val busPath: String) {
                 // reconnect any disconnected sensors
                 
                 
-                Log.w("Layer", "Reconnect interval elapsed, attempt to reconnect sensors.")
+                Log.w(TAG, "Reconnect interval elapsed, attempt to reconnect sensors.")
                 val iterator = reconnectList.iterator()
                 iterator.forEach { sensor ->
                     try {
@@ -246,7 +246,7 @@ class I2CSensorBus(val busPath: String) {
                 ) {
                     // Attempt to rescan all sensors
                     Log.w(
-                        "Layer",
+                        TAG,
                         "Max reconnection attempts exceeded. Resetting all sensors to re-detect and re-connect."
                     )
                     reconnectList.clear()
