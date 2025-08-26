@@ -28,11 +28,8 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
     @SuppressLint("DefaultLocale")
     override fun start() : Job {
         val job = CoroutineScope(context).launch {
-            // GPU thermal zones, determined by probing /sys/class/thermal/thermal_zone*/type
-            
-            
-            
             fun err(error : String) {
+                logError(error)
                 if (fields.containsKey("error")){
                     fields["error"]?.value = error
                 } else {
@@ -58,7 +55,7 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                             readings.add(tempFloat);
                         }
                     } catch (e : SecurityException) {
-                        Log.d(TAG, "Cannot access thermal zone: $zone")
+                        err("Cannot access thermal zone: $zone")
                         state.value = "N/A";
                     } catch (e : Exception) {
                         state.value = "Error"

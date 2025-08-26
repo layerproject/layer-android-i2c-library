@@ -43,6 +43,18 @@ abstract class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDi
         val TAG = "DeviceNodeSensors"
     }
     
+    protected var lastErrorMessage: String? = null
+    /**
+     * Return the last recorded error message, if any.s
+     */
+    public open fun lastError() : String? {
+        return lastErrorMessage
+    }
+    
+    public open fun logError(msg: String) {
+        this.lastErrorMessage = msg
+        Log.e(TAG, msg)
+    }
     val updateFrequencyMS: Long = DEFAULT_UPDATE_FREQUENCY
     
     fun setUpdateFrequency(freq:Long) : DeviceNodeSensor<T> {
@@ -51,6 +63,7 @@ abstract class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDi
     }
     
     fun getSensorState() = object : GenericSensorState<T> {
+        override val errorMessage : String? = lastError()
         override val connected = isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this.toString()
