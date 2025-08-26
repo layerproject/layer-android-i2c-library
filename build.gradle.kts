@@ -16,6 +16,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
+                // Ensure 16KB page alignment for Android 15+ compatibility
+                arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             }
         }
     }
