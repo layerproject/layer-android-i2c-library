@@ -94,6 +94,7 @@ open class TCA9548Multiplexer(
     }
     
     override fun getSensorState() = object : MultiplexerState {
+        override val errorMessage = lastError()
         override val connected = this@TCA9548Multiplexer.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@TCA9548Multiplexer.toString()

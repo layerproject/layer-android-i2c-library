@@ -70,13 +70,13 @@ open class SHT40Sensor : I2CSensor {
             Log.d(TAG, "Initializing SHT40 sensor on fd=$fileDescriptor")
             
             if (!softReset()) {
-                Log.e(TAG, "SHT40 sensor soft reset command failed")
+                logError(TAG, "SHT40 sensor soft reset command failed")
                 return false
             }
             
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing SHT40 sensor: ${e.message}")
+            logError(TAG, "Error initializing SHT40 sensor: ${e.message}")
             false
         }
     }
@@ -86,7 +86,7 @@ open class SHT40Sensor : I2CSensor {
         
         synchronized(lock) {
             if (!switchToDevice()) {
-                Log.e(TAG, "Failed switching to device ahead of sending command")
+                logError(TAG, "Failed switching to device ahead of sending command")
                 return false
             }
             
@@ -120,6 +120,7 @@ open class SHT40Sensor : I2CSensor {
     }
     
     override fun getSensorState() = object : TemperatureSensorState {
+        override val errorMessage = lastError()
         override val connected = this@SHT40Sensor.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@SHT40Sensor.toString()
@@ -145,7 +146,7 @@ open class SHT40Sensor : I2CSensor {
                 Log.d(TAG, "Measure temperature and humidity with high precision on SHT40: $writeResult")
                 
                 if (writeResult != 1) {
-                    Log.e(TAG, "Failed to send measurement command to SHT40")
+                    logError(TAG, "Failed to send measurement command to SHT40")
                     mapOf("ERROR" to 65535)
                 } else {
                     // SHT40 needs about 100ms to complete the measurement
@@ -190,20 +191,20 @@ open class SHT40Sensor : I2CSensor {
                             "HUMIDITY" to humidityScaled
                         )
                     } else {
-                        Log.e(TAG, "SHT40 CRC check failed")
+                        logError(TAG, "SHT40 CRC check failed")
                         temperature = DEFAULT_TEMPERATURE
                         humidity = DEFAULT_HUMIDITY
                         mapOf("ERROR" to 65535)
                     }
                 } else {
-                    Log.e(TAG, "Failed to read data block from SHT40: $bytesRead")
+                    logError(TAG, "Failed to read data block from SHT40: $bytesRead")
                     temperature = DEFAULT_TEMPERATURE
                     humidity = DEFAULT_HUMIDITY
                     mapOf("ERROR" to 65535)
                 }
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error during SHT40 transaction: ${e.message}", e)
+                logError(TAG, "Error during SHT40 transaction: ${e.message}", e)
                 temperature = DEFAULT_TEMPERATURE
                 humidity = DEFAULT_HUMIDITY
                 mapOf("ERROR" to 65535)

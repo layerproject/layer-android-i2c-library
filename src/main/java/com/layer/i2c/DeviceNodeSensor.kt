@@ -21,7 +21,7 @@ import kotlin.math.min
 
 interface RunnableSensor {
     var job : Job?
-    fun start() : Unit
+    fun start() : Job
     fun isConnected() : Boolean {
         return job != null && job!!.isActive
     }
@@ -34,10 +34,10 @@ interface RunnableSensor {
 /**
  * Read a sensor's value from a device node in sysfs
  */
-open class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDispatcher = Dispatchers.IO) : RunnableSensor {
+abstract class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDispatcher = Dispatchers.IO) : RunnableSensor {
     override var job : Job? = null
     protected open val state : MutableState<T> = mutableStateOf<T>(initialValue)
-    var valueLabel:String = "Value"
+    open var valueLabel:String = "Value"
     protected open val fields = mutableMapOf(valueLabel to state)
     companion object {
         val TAG = "DeviceNodeSensors"
@@ -56,9 +56,6 @@ open class DeviceNodeSensor<T>(val initialValue:T, val context : CoroutineDispat
         override val sensorId = this.toString()
         override val stateFields = mapOf(valueLabel to state)
     }
-    
-    override fun start() {
-    
-    }
+
    
 }

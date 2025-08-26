@@ -8,6 +8,7 @@ interface OnDataReceivedListener {
     fun onDataReceived(sensor: I2CSensor, channelData:  Map<String, Any>)
 }
 
+fun addressToHex(address: Int): String = "0x${address.toString(16).padStart(2, '0')}"
 
 /**
  * Base class for all I2C sensors.
@@ -85,12 +86,12 @@ abstract class I2CSensor(
      * A string that uniquely identifies an i2c devices by it's busPath, multiplexer channel and i2c saddress.
      */
     open fun deviceUniqueId(): String {
-        val address = getAddress()
+        val address = addressToHex(sensorAddress)
         val deviceId = if (isMultiplexed()) {
             val channel = getSensorMultiplexerChannel()
             "$busPath:$channel:$address"
         } else {
-            "$busPath:*:$address"
+            "$busPath::$address"
         }
         return deviceId;
     }
@@ -113,8 +114,8 @@ abstract class I2CSensor(
     }
     
     
-    public fun getAddress(): Int = sensorAddress
-    
+    fun getAddress(): Int = sensorAddress
+    fun getAddressHex() : String = addressToHex(sensorAddress)
     /**
      * Get the multiplexer channel this sensor is connected to.
      * @return The multiplexer channel (0-7) or null if directly connected
@@ -159,7 +160,26 @@ abstract class I2CSensor(
         return notifyListeners(readDataImpl())
     }
     
+    protected var lastErrorMessage: String? = null
+    /**
+     * Return the last recorded error message, if any.s
+     */
+    public open fun lastError() : String? {
+        return lastErrorMessage
+    }
+
+    public open fun logError(tag:String, msg: String, e: Throwable?=null) {
+        this.lastErrorMessage = msg
+        Log.e(tag, msg, e)
+    }
+    
+    public open fun logError(msg: String) {
+        this.lastErrorMessage = msg
+        Log.e(TAG, msg)
+    }
+    
     public open fun getSensorState() = object : SensorState {
+        override val errorMessage : String? = lastError()
         override val connected = isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@I2CSensor.toString()

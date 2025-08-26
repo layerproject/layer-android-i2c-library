@@ -22,6 +22,17 @@ interface SensorState {
     val updateTS: Long
     val sensorId: String
     
+    val errorMessage: String?
+    
+    
+    open fun hasError() : Boolean {
+        return errorMessage != null
+    }
+    
+    open fun error() : String {
+        return errorMessage ?: "N/A"
+    }
+    
     public fun timeOfUpdate(updateTS:Long) : String {
         val date = Date(updateTS)
         return DateTimeFormatter.ofPattern("HH:mm:ss").format( date.toInstant().atZone(java.time.ZoneId.systemDefault()) )
@@ -35,10 +46,21 @@ interface SensorState {
 
 interface GenericSensorState<T> : SensorState {
     val stateFields: Map<String, MutableState<T>>
+    
+    override fun hasError() : Boolean {
+        return super.hasError() || stateFields.keys.contains("ERROR")
+    }
+    
+    override fun error() : String {
+        return if (stateFields.keys.contains("ERROR")) {
+            stateFields["ERROR"]?.value.toString() ?: "N/A"
+        } else {
+            super.error()
+        }
+    }
 }
 
 interface StringSensorState : GenericSensorState<String> {
-
 }
 
 /**
@@ -48,6 +70,11 @@ interface StringSensorState : GenericSensorState<String> {
  */
 fun newSensorState(isConnected : Boolean, newSensorId : String, fields: Map<String, String>?) = object : GenericSensorState<String> {
     override val connected = isConnected
+    override val errorMessage = if (fields?.contains("ERROR") == true) {
+        fields.get("ERROR")
+    } else {
+        null
+    }
     override val updateTS = System.currentTimeMillis()
     override val sensorId = newSensorId
     override val stateFields = fields?.map { (key, value) -> key to mutableStateOf(value) }!!.toMap()

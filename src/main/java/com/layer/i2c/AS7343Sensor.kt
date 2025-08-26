@@ -268,6 +268,7 @@ open class AS7343Sensor : I2CSensor {
     }
     
     override fun getSensorState() = object : ColorSensorState {
+        override val errorMessage = lastError()
         override val connected = this@AS7343Sensor.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@AS7343Sensor.toString()

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -19,14 +20,14 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
     companion object {
         const val TAG = "ThermalZoneSensor"
     }
-    
+    override var valueLabel = "temperature"
     val zones = zoneIds.map { i -> "/sys/class/thermal/thermal_zone$i/temp" }
     /**
      * Starts monitoring device temperature
      */
     @SuppressLint("DefaultLocale")
-    override fun start() {
-        this.job = CoroutineScope(context).launch {
+    override fun start() : Job {
+        val job = CoroutineScope(context).launch {
             // GPU thermal zones, determined by probing /sys/class/thermal/thermal_zone*/type
             
             
@@ -87,6 +88,8 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                 delay(updateFrequencyMS) // Update every 5 seconds
             }
         }
+        this.job = job
+        return job
     }
 }
 
