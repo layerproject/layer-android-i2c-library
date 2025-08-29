@@ -1,6 +1,8 @@
 package com.layer.i2c
 
 import android.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
 
@@ -21,6 +23,9 @@ abstract class I2CSensor(
 ) {
     companion object {
         protected const val TAG = "I2CSensor"
+        
+        // Delay after switching to device address before performing operations (in milliseconds)
+        const val DEVICE_SWITCH_DELAY_MS = 100L
         
         // Map to track the current device address for each file descriptor
         private val currentDeviceMap = HashMap<Int, Int>()
@@ -457,6 +462,12 @@ abstract class I2CSensor(
             
             // Update our tracking of the current device
             setCurrentDevice(fileDescriptor, sensorAddress)
+            
+            // Add delay after switching to device to allow I2C bus and device to stabilize
+            runBlocking {
+                delay(DEVICE_SWITCH_DELAY_MS)
+            }
+            
             return true
         }
     }

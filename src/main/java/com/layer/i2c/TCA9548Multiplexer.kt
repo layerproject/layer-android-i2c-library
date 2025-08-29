@@ -1,6 +1,8 @@
 package com.layer.i2c
 
 import android.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
 typealias I2CMultiplexer = TCA9548Multiplexer
@@ -36,6 +38,9 @@ open class TCA9548Multiplexer(
         const val MIN_ADDRESS = 0x70
         const val MAX_ADDRESS = 0x77
         const val MAX_CHANNELS = 8
+        
+        // Delay after channel switch to allow bus stabilization
+        const val CHANNEL_SWITCH_DELAY_MS = 100L
         
         // Error codes
         const val ERROR_OK = 0
@@ -197,6 +202,11 @@ open class TCA9548Multiplexer(
             // Update cached value and log success
             currentChannelMask = validMask
             Log.d(TAG, "Set multiplexer channel mask to 0x${validMask.toString(16)}")
+        }
+        
+        // Add delay after channel switch to allow I2C bus and devices to stabilize
+        runBlocking {
+            delay(CHANNEL_SWITCH_DELAY_MS)
         }
     }
     

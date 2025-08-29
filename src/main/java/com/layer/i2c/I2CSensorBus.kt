@@ -58,6 +58,8 @@ class I2CSensorBus(val busPath: String) {
     companion object {
         private const val TAG = "I2CBusManager"
         private val context = newSingleThreadContext("I2CBusThread")
+        // Fixed delay after each sensor read (in milliseconds)
+        private const val SENSOR_READ_DELAY_MS = 100L
         // Singleton instance
         private val port0 = I2CSensorBus("/dev/i2c-0")
         private val port1 = I2CSensorBus("/dev/i2c-1")
@@ -216,9 +218,6 @@ class I2CSensorBus(val busPath: String) {
 
         ioJob = CoroutineScope(context).launch {
             scanForSensors()
-            // update interval is divided between the delay at the end of the for loop and
-            // another delay at the end of the while loop
-            val waitTime =  updateInterval / (allSensors.size+2)
             var currentTime: Long
             try {
                 while (isActive) {
@@ -251,6 +250,7 @@ class I2CSensorBus(val busPath: String) {
                                     Log.e(TAG, "Sensor $sensor returned empty data. Marking sensor as disconnected")
                                     errorCounter++
                                     reconnectList.add(sensor)
+                                    delay(SENSOR_READ_DELAY_MS)  // Delay after sensor read error
                                     
                                 } else if (data.containsKey("ERROR")) {
                                     Log.e(
@@ -259,11 +259,13 @@ class I2CSensorBus(val busPath: String) {
                                     )
                                     errorCounter++
                                     reconnectList.add(sensor)
+                                    delay(SENSOR_READ_DELAY_MS)  // Delay after sensor read error
                                     
                                 } else {
+                                    Log.d(TAG, "Sensor $sensor returned data: $data")
+                                    delay(SENSOR_READ_DELAY_MS)  // Delay after successful sensor read, before any other I2C operations
                                     val sensorId = sensor.deviceUniqueId()
                                     latestSensorState[sensorId] = sensor.getSensorState()
-                                    Log.d(TAG, "Sensor $sensor returned data: $data")
                                 }
                                 
                             }
@@ -272,6 +274,7 @@ class I2CSensorBus(val busPath: String) {
                             // Disconnect to ensure clean reconnection later
                             errorCounter++
                             reconnectList.add(sensor)
+                            delay(SENSOR_READ_DELAY_MS)  // Delay after I/O error
                         } catch(e: CancellationException) {
                             Log.e(TAG, "Coroutine canceled.", e)
                             throw e
@@ -279,8 +282,8 @@ class I2CSensorBus(val busPath: String) {
                             Log.e(TAG, "Unexpected error reading from sensor0: ${e.message}")
                             errorCounter++
                             reconnectList.add(sensor)
+                            delay(SENSOR_READ_DELAY_MS)  // Delay after unexpected error
                         }
-                        delay(waitTime)
                     }
                     
                     // reconnect any disconnected sensors
@@ -321,7 +324,7 @@ class I2CSensorBus(val busPath: String) {
                         cleanupSensors()
                         scanForSensors()
                     }
-                    delay(waitTime)
+                    delay(SENSOR_READ_DELAY_MS)
                 }
             } finally {
                 cleanupSensors()
