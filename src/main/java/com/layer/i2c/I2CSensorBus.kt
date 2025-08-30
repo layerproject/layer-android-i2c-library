@@ -3,11 +3,8 @@ package com.layer.i2c
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -15,11 +12,12 @@ import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.min
 
-public open class Expectation(
-    public open var expected: Any,
-    public open var instance: I2CSensor? = null
-) {}
+open class Expectation(
+    open var expected: Any,
+    open var instance: I2CSensor? = null
+)
 /** high level management of a single I2C bus
  * including the IO coroutine to repeatedly read from the bus.
  * Each sensor's latest readings are stored and exposed to the
@@ -27,35 +25,20 @@ public open class Expectation(
  */
 @OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
 class I2CSensorBus(val busPath: String) {
-    var allSensors : MutableSet<I2CSensor> = mutableSetOf()
-    var devicePathMap : MutableMap<String, I2CSensor> = mutableMapOf()
     
     var multiplexer : TCA9548Multiplexer? = null
-    var lastReconnectTime = 0L
     var lastRescanTime = 0L
     var errorCounter = 0
-    var rescanInterval = 10000L
-    var staleStateTimeoutMS = rescanInterval * 1.5
-    var updateInterval = 1000L
-    
-    var busThreadContext: ExecutorCoroutineDispatcher? = null
-    
-    init {
-        busThreadContext = newSingleThreadContext("I2C Bus $busPath")
-    }
-    
-    /** the number of sensors we expect to see, not counting multiplexers.
-     * If we find less than this number of sensors then we periodically
-     * perform a full bus scan looking for missing sensors.
-     */
-    var expectedSensorCount = 3
+    var rescanInterval = 15000L
+    var maxRescanInterval = 150000L
+    var updateInterval = 2000L
+    var staleStateTimeoutMS = updateInterval * 5
     
     private var reconnectList = mutableListOf<I2CSensor>()
-    
-    
     private var ioJob : Job? = null
     
     companion object {
+        var allSensors : MutableSet<I2CSensor> = mutableSetOf()
         private const val TAG = "I2CBusManager"
         private val context = newSingleThreadContext("I2CBusThread")
         // Fixed delay after each sensor read (in milliseconds)
@@ -92,7 +75,14 @@ class I2CSensorBus(val busPath: String) {
         }
     }
     
-    public suspend fun initSensors(devices : MutableList<DeviceInfo>) : MutableSet<I2CSensor> {
+    fun logException(e: Throwable){
+        logException(e.message, e)
+    }
+    fun logException(msg: String?, e: Throwable) {
+        Log.e(TAG, msg ?: e.toString(), e)
+    }
+    
+    suspend fun initSensors(devices : MutableList<DeviceInfo>) : MutableSet<I2CSensor> {
         val sensors : MutableSet<I2CSensor> = mutableSetOf()
         
         withContext(context) {
@@ -108,9 +98,6 @@ class I2CSensorBus(val busPath: String) {
                     }
                 }
             }
-            
-
-            
             sensors.forEach { sensor ->
                 if (!allSensors.contains(sensor)) {
                     try {
@@ -125,10 +112,12 @@ class I2CSensorBus(val busPath: String) {
                             }
                         }
                     } catch (e : Exception) {
+                        
                         Log.e(
                             TAG,
                             "Error connecting to ${sensor.getAddress()} on ${busPath}: ${e.message}"
                         )
+                        logException(e)
                     }
                 }
             }
@@ -140,16 +129,24 @@ class I2CSensorBus(val busPath: String) {
     /**
      * Scan a specific I2C port and log comprehensive results
      */
-    public suspend fun scanI2CPort() : MutableList<DeviceInfo> {
+    suspend fun scanI2CPort() : MutableList<DeviceInfo> {
         val allDevices : MutableList<DeviceInfo> = mutableListOf()
-        
+        val uniqueDeviceIds : MutableSet<String> = mutableSetOf()
         withContext(context) {
             try {
                 // Perform i2cdetect-style scan
                 val scanResult = I2CDetect.performI2CDetect(busPath)
                 
                 if (scanResult.detectedDevices.isNotEmpty()) {
-                    allDevices.addAll( scanResult.detectedDevices )
+                    for (dev in scanResult.detectedDevices) {
+                        // Record and deduplicate the detected devices
+                        // use * for devices no on any multiplexer channel
+                        val devId = "$busPath:*:${dev.address}"
+                        if (!uniqueDeviceIds.contains(devId)) {
+                            allDevices.add(dev)
+                            uniqueDeviceIds.add(devId)
+                        }
+                    }
                     
                     // Check for multiplexers and scan their channels
                     val multiplexers = scanResult.getDevicesOfType("TCA9548")
@@ -169,21 +166,30 @@ class I2CSensorBus(val busPath: String) {
                     }
                     if ( multiplexer!!.isReady() || multiplexer!!.connect()) {
                         val allChannels = multiplexer!!.scanAllChannels()
-                        val muxDevices = allChannels.channelDevices;
+                        val muxDevices = allChannels.channelDevices
                         for (channel in muxDevices.keys) {
                             muxDevices[channel]?.let {
-                                allDevices.addAll(it)
+                                for (dev in it) {
+                                    // The multiplexer allows us to turn off certain devices while scanning, howver,
+                                    // devices that are not on a multiplexer channel will still show up in the
+                                    // multiplexer scan, so we need to deduplicate.  We only allow one device per
+                                    // address and per channel. Devices with * as their channel will block
+                                    // the same device address with any channel. In order to have more than one
+                                    // device of the same address, all of them must be on a multiplexer channel.
+                                    if (!uniqueDeviceIds.contains("$busPath:*:${dev.address}")){
+                                        val channelDevId = "$busPath:${dev.channel}:${dev.address}"
+                                        if (!uniqueDeviceIds.contains(channelDevId)) {
+                                            allDevices.add(dev)
+                                            uniqueDeviceIds.add(channelDevId)
+                                        }
+                                    }
+                                }
                             }
                         }
-                        allDevices
-                    } else {
-                        allDevices
                     }
-                } else {
-                    allDevices
                 }
             } catch (e : Exception) {
-                Log.e(TAG, "Failed to scan $busPath: ${e.message}")
+                logException( "Failed to scan $busPath: ${e.message}", e)
             }
         }
         return allDevices
@@ -192,8 +198,12 @@ class I2CSensorBus(val busPath: String) {
     private suspend fun scanForSensors() {
         withContext(context) {
             val devices = scanI2CPort()
+            if (devices.isEmpty()) {
+                rescanInterval =  min(maxRescanInterval, (rescanInterval * 1.1).toLong())
+            }
             initSensors(devices)
             lastRescanTime = System.currentTimeMillis()
+
         }
     }
     
@@ -201,7 +211,7 @@ class I2CSensorBus(val busPath: String) {
         try {
             sensor?.disconnect()
         } catch (e : Exception) {
-            Log.e(TAG, "Error disconnecting sensor: ${e.message}")
+            logException("Error disconnecting sensor: ${e.message}", e)
         }
     }
     
@@ -218,9 +228,17 @@ class I2CSensorBus(val busPath: String) {
 
         ioJob = CoroutineScope(context).launch {
             scanForSensors()
+            // update interval is divided between the delay at the end of the for loop and
+            // another delay at the end of the while loop
+            
             var currentTime: Long
             try {
                 while (isActive) {
+                    val waitTime =  if (allSensors.isEmpty())
+                        updateInterval * 2
+                    else
+                        updateInterval / (allSensors.size+2)
+                    
                     currentTime = System.currentTimeMillis()
                     val it = latestSensorState.iterator()
                     for (state in it) {
@@ -239,9 +257,9 @@ class I2CSensorBus(val busPath: String) {
                                         reconnectList.add(sensor)
                                     }
                                 } catch (e : Exception) {
+                                    logException("Error connecting sensor: ${e.message}", e)
                                     reconnectList.add(sensor)
                                     errorCounter++
-                                    Log.e(TAG, "Error connecting sensor: ${e.message}")
                                 }
                             }
                             if (sensor.isReady()) {
@@ -276,31 +294,34 @@ class I2CSensorBus(val busPath: String) {
                             reconnectList.add(sensor)
                             delay(SENSOR_READ_DELAY_MS)  // Delay after I/O error
                         } catch(e: CancellationException) {
-                            Log.e(TAG, "Coroutine canceled.", e)
+                            Log.i(TAG, "Coroutine canceled.", e)
                             throw e
                         } catch (e : Exception) {
-                            Log.e(TAG, "Unexpected error reading from sensor0: ${e.message}")
+                            logException("Unexpected error reading from sensor0: ${e.message}", e)
                             errorCounter++
                             reconnectList.add(sensor)
                             delay(SENSOR_READ_DELAY_MS)  // Delay after unexpected error
                         }
+                        delay(waitTime)
                     }
                     
                     // reconnect any disconnected sensors
-                    
                     val iterator = reconnectList.iterator()
                     iterator.forEach { sensor ->
                         try {
                             tryDisconnectSafely(sensor)
                             if (sensor.connect()) {
-                                Log.w(TAG, "Reconnected: $sensor.")
+                                Log.i(TAG, "Reconnected: $sensor.")
                                 iterator.remove()
+                            } else {
+                                Log.e(TAG, "Reconnect failed. Will continue trying.")
+                                errorCounter++
                             }
                         } catch (e : IOException) {
-                            Log.w(TAG, "Reconnect failed $sensor due to ${e.message}")
+                            logException("Reconnect failed $sensor due to ${e.message}", e)
                             errorCounter++
                             tryDisconnectSafely(sensor)
-                            Log.w(TAG, "Removing $sensor from active polling.")
+                            Log.i(TAG, "Removing $sensor from active polling.")
                             // Remove the sensor from active polling but keep it in the reconnect
                             allSensors.remove(sensor)
                             latestSensorState.remove(sensor.deviceUniqueId())
@@ -356,7 +377,8 @@ class I2CSensorBus(val busPath: String) {
             tryDisconnectSafely(multiplexer)
             this.multiplexer = null
         }
-        
+        mappedSensors.clear()
         allSensors.clear()
+        reconnectList.clear()
     }
 }

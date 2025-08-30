@@ -71,7 +71,7 @@ interface StringSensorState : GenericSensorState<String> {
 fun newSensorState(isConnected : Boolean, newSensorId : String, fields: Map<String, String>?) = object : GenericSensorState<String> {
     override val connected = isConnected
     override val errorMessage = if (fields?.contains("ERROR") == true) {
-        fields.get("ERROR")
+        fields["ERROR"]
     } else {
         null
     }

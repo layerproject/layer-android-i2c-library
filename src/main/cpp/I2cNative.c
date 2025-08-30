@@ -105,7 +105,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_switchDeviceAddress
     __u8 devAddr = deviceAddress & 0xFF;
     
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "Switching I2C device address to 0x%02X on FD: %d", devAddr, fd);
+    syslog(LOG_DEBUG, "Switching I2C device address to 0x%02X on FD: %d", devAddr, fd);
     closelog();
     
     int result = switch_i2c_device(fd, devAddr);
@@ -154,7 +154,7 @@ JNIEXPORT jlong JNICALL Java_com_layer_i2c_I2cNative_readAllBytes
         (JNIEnv *env, jclass jcl, jint fd, jint address)
 {
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C readAllBytes");
+    syslog(LOG_DEBUG, "I2C readAllBytes");
     closelog();
 
     __u8 addr = address & 0xFF;
@@ -167,7 +167,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
         (JNIEnv *env, jclass jcl, jint fd, jbyteArray jbuffer, jint length)
 {
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C readRawBytes");
+    syslog(LOG_DEBUG, "I2C readRawBytes");
     closelog();
 
     if (length <= 0 || length > 32) {
@@ -182,7 +182,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
     int bytesRead = read(fd, buffer, length);
 
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C %d bytes read on FD: %d", bytesRead, fd);
+    syslog(LOG_DEBUG, "I2C %d bytes read on FD: %d", bytesRead, fd);
     closelog();
     
     if (bytesRead <= 0) {

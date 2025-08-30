@@ -40,8 +40,10 @@ open class AS7343Sensor : I2CSensor {
     private val BIT_MEASUREMENT: Int = 1     // Measurement enable bit position
     private val REG_CFG1: Int = 0xC6         // Gain configuration register
     
-    @Volatile
-    open var primaryChannelData: MutableMap<String, Int>? = mutableMapOf()
+    private var primaryChannelData: MutableMap<String, Int> = mutableMapOf(
+        "F1" to 0, "F2" to 0, "F3" to 0, "F4" to 0,
+        "F5" to 0, "F6" to 0, "F7" to 0, "F8" to 0
+    )
     
     companion object : SensorFactory<I2CSensor> {
         
@@ -272,11 +274,7 @@ open class AS7343Sensor : I2CSensor {
         override val connected = this@AS7343Sensor.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@AS7343Sensor.toString()
-        override val channelData :  Map<String, Int> = getLatestChannelData()?.toMap()
-            ?: mapOf(
-                "F1" to 0, "F2" to 0, "F3" to 0, "F4" to 0,
-                "F5" to 0, "F6" to 0, "F7" to 0, "F8" to 0
-            )
+        override val channelData :  Map<String, Int> = getLatestChannelData().toMap()
     }
     
     override fun readDataImpl(): Map<String, Int> {
@@ -288,7 +286,7 @@ open class AS7343Sensor : I2CSensor {
         }
     }
     
-    fun getLatestChannelData(): Map<String, Int>? {
+    fun getLatestChannelData(): Map<String, Int> {
         return this.primaryChannelData
     }
     /**

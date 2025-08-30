@@ -29,7 +29,7 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
     override fun start() : Job {
         val job = CoroutineScope(context).launch {
             fun err(error : String) {
-                logError(error)
+                logError("$valueLabel sensor error: $error")
                 if (fields.containsKey("error")){
                     fields["error"]?.value = error
                 } else {
@@ -59,13 +59,14 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                         state.value = "N/A";
                     } catch (e : Exception) {
                         state.value = "Error"
+                        Log.e(TAG, "Unexpected Error:", e)
                     }
                     index = (index + 1) % zones.size
                 }
                 val tMean = sumOfTemps / readings.size
                 var tVar=0F
-                var tMin=0F
-                var tMax=0F
+                var tMin=tMean
+                var tMax=tMean
                 for (temp in readings) {
                     var variance = abs(temp - tMean)
                     variance = variance * variance // Variance²
@@ -76,11 +77,14 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                 }
                 val stdDev = tVar / readings.size
                 state.value = String.format("%.1f°C", tMean)
-                if (tMin < tMean - (stdDev * 3))
-                {
-                    err("tMin greater than 3 standard deviations from the mean.")
-                } else if (tMax > tMean +  (stdDev * 3)) {
-                    err("tMin greater than 3 standard deviations from the mean.")
+                if (tMin <= 0 ) {
+                    err("Sensor out of range: tMin is <= 0c")
+                } else if (tMax > 99) {
+                    err("Sensor out of range: tMax is > 99c")
+                } else if (stdDev > 0.5 && tMin < tMean - (stdDev * 5))  {
+                    Log.w( valueLabel, "tMin($tMin) more than 5 standard deviations(stdDev=$stdDev) below the mean($tMean).")
+                } else if (stdDev > 0.5 && tMax > tMean + (stdDev * 5)) {
+                    Log.w(valueLabel, "tMax($tMax) more than 5 standard deviations(stdDev=$stdDev) above the mean($tMean).")
                 }
                 delay(updateFrequencyMS) // Update every 5 seconds
             }

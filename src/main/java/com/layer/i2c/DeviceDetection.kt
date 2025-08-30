@@ -27,6 +27,12 @@ data class DeviceInfo(
         val deviceTypeStr = deviceType?.let { " ($it)" } ?: ""
         return "Device at ${getAddressHex()} on channel $channel$deviceTypeStr"
     }
+    
+    fun isSameDevice(other : Any?) : Boolean {
+        return (other is DeviceInfo) &&
+               (other.channel == this.channel || other.channel == -1 || this.channel == -1) &&
+               (other.address == this.address)
+    }
 }
 
 /**
