@@ -376,7 +376,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_recoverBus
     }
     
     // All recovery methods failed
-    syslog(LOG_ERROR, "All I2C bus recovery methods failed on FD: %d", fd);
+    syslog(LOG_ERR, "All I2C bus recovery methods failed on FD: %d", fd);
     closelog();
     return -1;
 }
