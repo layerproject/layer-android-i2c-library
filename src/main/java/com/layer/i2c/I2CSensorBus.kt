@@ -376,10 +376,6 @@ class I2CSensorBus(val busPath: String) {
                     tryDisconnectSafely(multiplexer)
                 } catch(e:Exception) {
                     logException(e)
-                    Log.w(TAG, "Attempting low-level I2C bus recovery.")
-                    val res = multiplexer.attemptBusRecovery()
-                    Log.w(TAG, "I2C bus Recovery result: $res")
-                    
                 }
             }
         } finally {
