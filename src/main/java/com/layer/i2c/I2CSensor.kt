@@ -5,6 +5,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
+class I2CException(override val message:String, val reg: Int = -1, val value : Int? = null, val fileDescriptor: Int? = null,  val errorCode: Int = -1) : IOException(message) {
+    override fun toString() : String {
+        return "I2CException ${message} on fd=$fileDescriptor, reg=0x${reg.toString(16)}, value=0x${value?.toString(16)}, code=$errorCode"
+    }
+}
 
 interface OnDataReceivedListener {
     fun onDataReceived(sensor: I2CSensor, channelData:  Map<String, Any>)
@@ -464,9 +469,7 @@ abstract class I2CSensor(
             setCurrentDevice(fileDescriptor, sensorAddress)
             
             // Add delay after switching to device to allow I2C bus and device to stabilize
-            runBlocking {
-                delay(DEVICE_SWITCH_DELAY_MS)
-            }
+            Thread.sleep(DEVICE_SWITCH_DELAY_MS)
             
             return true
         }
@@ -958,15 +961,25 @@ abstract class I2CSensor(
         
         val result = I2cNative.writeByte(fileDescriptor, register, newValue)
         if (result < 0) {
-            throw IOException(
-                "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
-                    newValue.toString(
-                        16
-                    )
-                }, code=$result"
+            throw I2CException("I2C Write Error",
+                fileDescriptor=fileDescriptor,
+                reg=register,
+                value=newValue,
+                errorCode=result
+            
             )
+            
         }
     }
+    
+    /**
+     * Attempt to recover a stalled I2C bus.
+     * @return true if recovery was successful.
+     */
+    protected fun attemptBusRecovery() : Boolean {
+        return I2cNative.recoverBus(fileDescriptor) == 0;
+    }
+    
     
     /**
      * Check if this sensor is using a multiplexer.

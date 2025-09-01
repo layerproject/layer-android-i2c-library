@@ -103,6 +103,7 @@ open class TCA9548Multiplexer(
         override val connected = this@TCA9548Multiplexer.isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@TCA9548Multiplexer.toString()
+        override val channelMask = this@TCA9548Multiplexer.getChannelMask()
         override val deviceSummary = "Multiplexer ${busPath} address 0x${multiplexerAddress.toString(16)}: Devices: ${deviceMap.toString()}"
     }
     
@@ -189,24 +190,41 @@ open class TCA9548Multiplexer(
         val validMask = mask and ((1 shl maxChannels) - 1)
         
         synchronized(fdLock ?: this) {
-            if (!switchToDevice()) {
-                throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
+            var errorCount = 0
+            // this will repeat once if the i2c bus recovery succeeds in the catch block at tht end of the loop.
+            // if the recovery fails, or the transaction fails a second time after one recovery attempt, then we
+            // bail by throwing the exception up the stack.
+            while(true) {
+                try {
+                    if (!switchToDevice()) {
+                        throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
+                    }
+                    
+                    // Simple single-byte write to TCA9548 - just like reference libraries
+                    val result = I2cNative.write(fileDescriptor, validMask)
+                    if (result < 0) {
+                        throw IOException("Failed to write channel mask to multiplexer: I2C error $result")
+                    }
+                    // Update cached value and log success
+                    currentChannelMask = validMask
+                    Log.d(TAG, "Set multiplexer channel mask to 0x${validMask.toString(16)}")
+                    // Add delay after channel switch to allow I2C bus and devices to stabilize
+                    Thread.sleep(CHANNEL_SWITCH_DELAY_MS)
+                    return
+                } catch (e : IOException) {
+                    errorCount++;
+                    Log.e(TAG, "Error writing channel mask. Attempting to recover", e);
+                    if (attemptBusRecovery()) {
+                        Log.i(TAG, "I2C Bus recovery appears to be successful. Will retry transaction.")
+                    } else {
+                        errorCount++;
+                    }
+                    if (errorCount > 1) {
+                        Log.e(TAG, "I2C Bus recovery appears to have failed. Aborting transaction.")
+                        throw e;
+                    }
+                }
             }
-            
-            // Simple single-byte write to TCA9548 - just like reference libraries
-            val result = I2cNative.write(fileDescriptor, validMask)
-            if (result < 0) {
-                throw IOException("Failed to write channel mask to multiplexer: I2C error $result")
-            }
-            
-            // Update cached value and log success
-            currentChannelMask = validMask
-            Log.d(TAG, "Set multiplexer channel mask to 0x${validMask.toString(16)}")
-        }
-        
-        // Add delay after channel switch to allow I2C bus and devices to stabilize
-        runBlocking {
-            delay(CHANNEL_SWITCH_DELAY_MS)
         }
     }
     

@@ -340,7 +340,6 @@ class I2CSensorBus(val busPath: String) {
                             TAG,
                             "Max reconnection attempts exceeded. Resetting all sensors to re-detect and re-connect."
                         )
-                        reconnectList.clear()
                         lastRescanTime = currentTime
                         cleanupSensors()
                         scanForSensors()
@@ -360,25 +359,34 @@ class I2CSensorBus(val busPath: String) {
     
     /** Disconnect all devices on this bus and free up resources */
     fun cleanupSensors() {
-        errorCounter = 0
-        // Clean up attached sensors before multiplexers.
-        for (sensor in allSensors) {
-            if (sensor !is TCA9548Multiplexer) {
-                tryDisconnectSafely(sensor)
+        try {
+            errorCounter = 0
+            // Clean up attached sensors before multiplexers.
+            for (sensor in allSensors) {
+                if (sensor !is TCA9548Multiplexer) {
+                    tryDisconnectSafely(sensor)
+                }
             }
-        }
-        val multiplexer = this.multiplexer
-        if (multiplexer != null) {
-            // now clean up multiplexers (if any)
-            if (multiplexer.connected) {
-                multiplexer.connect()
+            val multiplexer = this.multiplexer
+            if (multiplexer != null) {
+                try {
+                    // now clean up multiplexers (if any)
+                    multiplexer.connect()
+                    multiplexer.disableAllChannels()
+                    tryDisconnectSafely(multiplexer)
+                } catch(e:Exception) {
+                    logException(e)
+                    Log.w(TAG, "Attempting low-level I2C bus recovery.")
+                    val res = multiplexer.attemptBusRecovery()
+                    Log.w(TAG, "I2C bus Recovery result: $res")
+                    
+                }
             }
-            multiplexer.disableAllChannels()
-            tryDisconnectSafely(multiplexer)
+        } finally {
             this.multiplexer = null
+            mappedSensors.clear()
+            allSensors.clear()
+            reconnectList.clear()
         }
-        mappedSensors.clear()
-        allSensors.clear()
-        reconnectList.clear()
     }
 }

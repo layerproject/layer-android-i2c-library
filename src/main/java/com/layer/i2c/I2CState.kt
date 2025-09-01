@@ -87,6 +87,7 @@ fun newSensorState(sensor: I2CSensor) : SensorState {
 
 
 interface MultiplexerState : SensorState {
+    val channelMask : Int
     val deviceSummary : String
 }
 
