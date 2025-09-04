@@ -31,8 +31,8 @@ class I2CSensorBus(val busPath: String) {
     var errorCounter = 0
     var rescanInterval = 15000L
     var maxRescanInterval = 150000L
-    var updateInterval = 2000L
-    var staleStateTimeoutMS = updateInterval * 5
+    var updateInterval = 5000L
+    var staleStateTimeoutMS = updateInterval * 3
     
     private var reconnectList = mutableListOf<I2CSensor>()
     private var ioJob : Job? = null
@@ -88,8 +88,8 @@ class I2CSensorBus(val busPath: String) {
         withContext(context) {
             devices.forEach { device ->
                 val devClass = CommonI2CDevices.getDeviceClass(device.address)
-                if (devClass !== TCA9548Multiplexer) {
-                    val sensor = devClass!!.create(busPath)
+                if (devClass != null && devClass !== TCA9548Multiplexer) {
+                    val sensor = devClass.create(busPath)
                     if (sensor !is TCA9548Multiplexer) {
                         if (multiplexer != null && device.channel >= 0) {
                             sensor.setMultiplexer(multiplexer!!, device.channel)
