@@ -16,6 +16,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
+                // Ensure 16KB page alignment for Android 15+ compatibility
+                arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             }
         }
     }
@@ -52,6 +54,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation(libs.androidx.runtime)
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

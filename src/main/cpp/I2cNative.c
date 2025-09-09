@@ -105,7 +105,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_switchDeviceAddress
     __u8 devAddr = deviceAddress & 0xFF;
     
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "Switching I2C device address to 0x%02X on FD: %d", devAddr, fd);
+    syslog(LOG_DEBUG, "Switching I2C device address to 0x%02X on FD: %d", devAddr, fd);
     closelog();
     
     int result = switch_i2c_device(fd, devAddr);
@@ -154,7 +154,7 @@ JNIEXPORT jlong JNICALL Java_com_layer_i2c_I2cNative_readAllBytes
         (JNIEnv *env, jclass jcl, jint fd, jint address)
 {
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C readAllBytes");
+    syslog(LOG_DEBUG, "I2C readAllBytes");
     closelog();
 
     __u8 addr = address & 0xFF;
@@ -167,7 +167,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
         (JNIEnv *env, jclass jcl, jint fd, jbyteArray jbuffer, jint length)
 {
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C readRawBytes");
+    syslog(LOG_DEBUG, "I2C readRawBytes");
     closelog();
 
     if (length <= 0 || length > 32) {
@@ -182,7 +182,7 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
     int bytesRead = read(fd, buffer, length);
 
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "I2C %d bytes read on FD: %d", bytesRead, fd);
+    syslog(LOG_DEBUG, "I2C %d bytes read on FD: %d", bytesRead, fd);
     closelog();
     
     if (bytesRead <= 0) {
@@ -282,4 +282,101 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_scanAddress
     syslog(LOG_DEBUG, "No device found at 0x%02X", devAddr);
     closelog();
     return 0;
+}
+
+/**
+ * Attempts to recover a frozen I2C bus using Linux kernel recovery mechanisms.
+ * This function tries multiple recovery approaches to restore bus functionality:
+ * 1. I2C_RECOVER ioctl (if supported by kernel/driver)
+ * 2. Bus reset through re-initialization
+ * 3. Force device switch to try clearing stuck transactions
+ * 
+ * @param fd File descriptor for the I2C bus
+ * @return 0 if recovery successful, -1 if recovery failed
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_recoverBus
+        (JNIEnv *env, jclass jcl, jint fd)
+{
+    if (fd < 0) {
+        return -1;
+    }
+    
+    openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+    syslog(LOG_INFO, "Attempting I2C bus recovery on FD: %d", fd);
+    
+    // Method 1: Try I2C_RECOVER ioctl if supported by the kernel driver
+    // This leverages kernel-level recovery mechanisms that may include:
+    // - Clock pulse generation to unstick SDA line
+    // - Bus state machine reset
+    // - Hardware-specific recovery procedures
+#ifdef I2C_RECOVER
+    syslog(LOG_DEBUG, "Attempting I2C_RECOVER ioctl on FD: %d", fd);
+    if (ioctl(fd, I2C_RECOVER) == 0) {
+        syslog(LOG_INFO, "I2C bus recovery successful using I2C_RECOVER ioctl on FD: %d", fd);
+        closelog();
+        return 0;
+    }
+    syslog(LOG_DEBUG, "I2C_RECOVER ioctl failed or not supported on FD: %d", fd);
+#endif
+    
+    // Method 2: Try to clear any stuck transaction by switching to general call address
+    // The general call address (0x00) can sometimes help clear stuck transactions
+    syslog(LOG_DEBUG, "Attempting general call address switch for recovery on FD: %d", fd);
+    if (ioctl(fd, I2C_SLAVE, 0x00) == 0) {
+        // Try a quick write to general call address - this may help unstick the bus
+        union i2c_smbus_data data;
+        int result = i2c_smbus_access(fd, I2C_SMBUS_WRITE, 0, I2C_SMBUS_QUICK, NULL);
+        if (result == 0) {
+            syslog(LOG_INFO, "I2C bus recovery successful using general call on FD: %d", fd);
+            closelog();
+            return 0;
+        }
+    }
+    
+    // Method 3: Try force-clearing any pending transactions
+    // This attempts to send a STOP condition by doing a quick read/write cycle
+    syslog(LOG_DEBUG, "Attempting transaction force-clear for recovery on FD: %d", fd);
+    
+    // Try switching to a safe address and doing minimal operations
+    for (int addr = 0x08; addr <= 0x77; addr += 8) {
+        if (ioctl(fd, I2C_SLAVE, addr) == 0) {
+            // Try a quick operation that might help clear the bus
+            union i2c_smbus_data data;
+            if (i2c_smbus_access(fd, I2C_SMBUS_READ, 0, I2C_SMBUS_QUICK, NULL) == 0) {
+                syslog(LOG_INFO, "I2C bus recovery successful using address probe method on FD: %d", fd);
+                closelog();
+                return 0;
+            }
+        }
+    }
+    
+    // Method 4: Try resetting I2C functionality flags
+    // Some drivers support resetting specific I2C functionality
+    syslog(LOG_DEBUG, "Attempting I2C functionality reset on FD: %d", fd);
+    
+    // Query current functionality to ensure the bus is still operational
+    unsigned long funcs;
+    if (ioctl(fd, I2C_FUNCS, &funcs) == 0) {
+        // If we can query functionality, the low-level driver is responsive
+        // Try one more general call attempt
+        if (ioctl(fd, I2C_SLAVE, 0x00) == 0) {
+            syslog(LOG_INFO, "I2C bus recovery: driver responsive, attempting final general call on FD: %d", fd);
+            
+            // Give the bus some time to settle
+            usleep(1000); // 1ms delay
+            
+            // Try a final quick write
+            union i2c_smbus_data data;
+            if (i2c_smbus_access(fd, I2C_SMBUS_WRITE, 0, I2C_SMBUS_QUICK, NULL) == 0) {
+                syslog(LOG_INFO, "I2C bus recovery successful using delayed general call on FD: %d", fd);
+                closelog();
+                return 0;
+            }
+        }
+    }
+    
+    // All recovery methods failed
+    syslog(LOG_ERR, "All I2C bus recovery methods failed on FD: %d", fd);
+    closelog();
+    return -1;
 }

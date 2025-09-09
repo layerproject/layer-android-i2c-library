@@ -108,4 +108,14 @@ public class I2cNative {
      * @return 1 if device responds, 0 if no device found, -1 if error
      */
     public static native int scanAddress(int fd, int deviceAddress);
+    
+    /**
+     * Attempts to recover a frozen I2C bus using various recovery mechanisms.
+     * This method tries multiple approaches to restore bus functionality including
+     * kernel-level recovery ioctls, bus resets, and transaction clearing.
+     *
+     * @param fd file descriptor of i2c bus
+     * @return 0 if recovery successful, -1 if recovery failed
+     */
+    public static native int recoverBus(int fd);
 }

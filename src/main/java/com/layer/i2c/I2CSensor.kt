@@ -1,13 +1,21 @@
 package com.layer.i2c
 
 import android.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
+class I2CException(override val message:String, val reg: Int = -1, val value : Int? = null, val fileDescriptor: Int? = null,  val errorCode: Int = -1) : IOException(message) {
+    override fun toString() : String {
+        return "I2CException ${message} on fd=$fileDescriptor, reg=0x${reg.toString(16)}, value=0x${value?.toString(16)}, code=$errorCode"
+    }
+}
 
 interface OnDataReceivedListener {
     fun onDataReceived(sensor: I2CSensor, channelData:  Map<String, Any>)
 }
 
+fun addressToHex(address: Int): String = "0x${address.toString(16).padStart(2, '0')}"
 
 /**
  * Base class for all I2C sensors.
@@ -20,6 +28,9 @@ abstract class I2CSensor(
 ) {
     companion object {
         protected const val TAG = "I2CSensor"
+        
+        // Delay after switching to device address before performing operations (in milliseconds)
+        const val DEVICE_SWITCH_DELAY_MS = 100L
         
         // Map to track the current device address for each file descriptor
         private val currentDeviceMap = HashMap<Int, Int>()
@@ -81,13 +92,16 @@ abstract class I2CSensor(
         return data
     }
     
+    /**
+     * A string that uniquely identifies an i2c devices by it's busPath, multiplexer channel and i2c saddress.
+     */
     open fun deviceUniqueId(): String {
-        val address = getAddress()
+        val address = addressToHex(sensorAddress)
         val deviceId = if (isMultiplexed()) {
             val channel = getSensorMultiplexerChannel()
             "$busPath:$channel:$address"
         } else {
-            "$busPath:*:$address"
+            "$busPath::$address"
         }
         return deviceId;
     }
@@ -110,8 +124,8 @@ abstract class I2CSensor(
     }
     
     
-    public fun getAddress(): Int = sensorAddress
-    
+    fun getAddress(): Int = sensorAddress
+    fun getAddressHex() : String = addressToHex(sensorAddress)
     /**
      * Get the multiplexer channel this sensor is connected to.
      * @return The multiplexer channel (0-7) or null if directly connected
@@ -156,10 +170,33 @@ abstract class I2CSensor(
         return notifyListeners(readDataImpl())
     }
     
+    protected var lastErrorMessage: String? = null
+    /**
+     * Return the last recorded error message, if any.s
+     */
+    public open fun lastError() : String? {
+        return this.lastErrorMessage
+    }
+
+    public open fun logError(tag:String, msg: String, e: Throwable?=null) {
+        this.lastErrorMessage = msg
+        Log.e(tag, msg, e)
+    }
+    
+    public open fun logError(msg: String) {
+        this.lastErrorMessage = msg
+        Log.e(TAG, msg)
+    }
+    
     public open fun getSensorState() = object : SensorState {
+        override val errorMessage : String? = lastError()
         override val connected = isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@I2CSensor.toString()
+    }
+    
+    public open fun shouldUpdateState(): Boolean {
+        return true
     }
     
     /**
@@ -248,7 +285,7 @@ abstract class I2CSensor(
     
     
     open var connected: Boolean = false
-    open public fun isConnected(): Boolean {
+    open fun isConnected(): Boolean {
         if (multiplexer != null && multiplexer?.isConnected() == false) {
             connected = false
         }
@@ -434,6 +471,10 @@ abstract class I2CSensor(
             
             // Update our tracking of the current device
             setCurrentDevice(fileDescriptor, sensorAddress)
+            
+            // Add delay after switching to device to allow I2C bus and device to stabilize
+            Thread.sleep(DEVICE_SWITCH_DELAY_MS)
+            
             return true
         }
     }
@@ -924,15 +965,25 @@ abstract class I2CSensor(
         
         val result = I2cNative.writeByte(fileDescriptor, register, newValue)
         if (result < 0) {
-            throw IOException(
-                "I2C Write Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, value=0x${
-                    newValue.toString(
-                        16
-                    )
-                }, code=$result"
+            throw I2CException("I2C Write Error",
+                fileDescriptor=fileDescriptor,
+                reg=register,
+                value=newValue,
+                errorCode=result
+            
             )
+            
         }
     }
+    
+    /**
+     * Attempt to recover a stalled I2C bus.
+     * @return true if recovery was successful.
+     */
+    protected fun attemptBusRecovery() : Boolean {
+        return I2cNative.recoverBus(fileDescriptor) == 0;
+    }
+    
     
     /**
      * Check if this sensor is using a multiplexer.

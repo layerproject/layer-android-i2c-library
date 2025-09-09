@@ -1,6 +1,8 @@
 # Layer Android I2C Library
 
-An Android library for I2C communication and AS73XX spectral sensor interactions. This library provides a clean API for communicating with I2C devices, with specific support for the AS7341 and AS7343 spectral sensors.
+An Android library for I2C communication and AS73XX spectral sensor interactions. This library
+provides a clean API for communicating with I2C devices, with specific support for the AS7341 and
+AS7343 spectral sensors.
 
 ## Features
 
@@ -28,8 +30,10 @@ dependencyResolutionManagement {
             name = "GitHubPackages"
             url = uri("https://maven.pkg.github.com/layerproject/layer-android-i2c-library")
             credentials {
-                username = project.findProperty("gpr.user") as String? ?: System.getenv("GITHUB_USER")
-                password = project.findProperty("gpr.key") as String? ?: System.getenv("GITHUB_TOKEN")
+                username =
+                    project.findProperty("gpr.user") as String? ?: System.getenv("GITHUB_USER")
+                password =
+                    project.findProperty("gpr.key") as String? ?: System.getenv("GITHUB_TOKEN")
             }
         }
     }
@@ -103,7 +107,8 @@ sensor2.disconnect()
 
 ### Using I2C Multiplexers
 
-The library supports the TCA9548 family of I2C multiplexers, allowing you to connect multiple sensors with the same I2C address.
+The library supports the TCA9548 family of I2C multiplexers, allowing you to connect multiple
+sensors with the same I2C address.
 
 #### Basic Multiplexer Usage
 
@@ -185,7 +190,9 @@ if (multiplexer.connect()) {
 
 #### Device Detection and Scanning
 
-The library provides comprehensive device detection capabilities using `i2cdetect`-style probing. This allows you to discover I2C devices without needing to know their specific protocols - just like the Linux `i2cdetect` command.
+The library provides comprehensive device detection capabilities using `i2cdetect`-style probing.
+This allows you to discover I2C devices without needing to know their specific protocols - just like
+the Linux `i2cdetect` command.
 
 ##### Direct I2C Bus Scanning (like i2cdetect)
 
@@ -198,13 +205,13 @@ println(detectResult.formattedTable)
 /*
 Output:
      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-00:          -- -- -- -- -- -- -- -- -- -- -- -- -- 
-10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-30: -- -- -- -- -- -- -- -- -- 39 -- -- -- -- -- -- 
-40: -- -- -- -- 44 -- -- -- -- -- -- -- -- -- -- -- 
-50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
-60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+00:          -- -- -- -- -- -- -- -- -- -- -- -- --
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+30: -- -- -- -- -- -- -- -- -- 39 -- -- -- -- -- --
+40: -- -- -- -- 44 -- -- -- -- -- -- -- -- -- -- --
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 70: 70 -- -- -- -- -- -- --
 */
 
@@ -215,7 +222,7 @@ detectResult.detectedDevices.forEach { device ->
 }
 // Output:
 // 0x39: AS7343 Spectral Sensor
-// 0x44: SHT40 Temperature/Humidity Sensor  
+// 0x44: SHT40 Temperature/Humidity Sensor
 // 0x70: TCA9548 I2C Multiplexer
 
 // Quick check if specific device is present
@@ -306,7 +313,7 @@ if (multiplexer.connect()) {
     
     // Scan specific channels with custom config
     val results = multiplexer.scanChannels(
-        channels = listOf(0, 2, 4), 
+        channels = listOf(0, 2, 4),
         config = config
     )
     
@@ -357,6 +364,139 @@ if (multiplexer.connect()) {
     multiplexer.disconnect()
 }
 ```
+
+### I2CSensorBus provides a reusable I/O Loop
+
+The [I2CSensorBus class](src/main/java/com/layer/i2c/I2CSensorBus.kt) provides an easy interface for
+getting
+sensor readings without implementing all of the device detection, multiplexer management and thread
+safety concerns. This class implements a reusable IO loop that runs in a dedicated IO thread and
+coroutine context.
+
+To use the sensor bus you simply create an instance by calling the
+static constructor:
+
+```kotlin
+/*        open /dev/i2c-0               */
+val port0 = I2CSensorBus.getInstance(0)
+/*  start the IO loop coroutine */
+port0.start()
+```
+
+I2CSensorBus takes care of reading from all of the sensors on a dedicated IO thread. The latest
+reading from each sensor is made available as an immutable data structure which you can access by
+calling `I2CSensorBus.getAllSensorState()` which returns a `Map<String, SensorState>` where
+`sensorId` Strings are mapped to [SensorState](src/main/java/com/layer/i2c/I2CState.kt) objects.
+
+Each device driver provides `SensorState` objects via the `getSensorState()` method
+implementation in the respective `I2CSensor` sub-classes. For
+example, [SHT40Sensor.kt](src/main/java/com/layer/i2c/SHT40Sensor.kt) provides this simple
+implementation:
+
+```kotlin
+override fun getSensorState() = object : TemperatureSensorState {
+    override val errorMessage = lastError()
+    override val connected = this@SHT40Sensor.isConnected()
+    override val updateTS = System.currentTimeMillis()
+    override val sensorId = this@SHT40Sensor.toString()
+    override val temperature = this@SHT40Sensor.temperature
+    override val humidity = this@SHT40Sensor.humidity
+}
+```
+
+Here is a detailed example of of using I2CSensorBus with multiple i2c ports and multiple sensors
+attached:
+
+```kotlin
+private fun startWatchingSensors() {
+    sensorMonitoringJob = CoroutineScope(Dispatchers.IO).launch {
+        /*
+        * Instantiate an instance for every i2c bus that
+        * you need to read from:
+        */
+        val ports = listOf(
+            I2CSensorBus.getInstance(0),  // /dev/i2c-0
+            I2CSensorBus.getInstance(1),  // /dev/i2c-1
+        )
+        
+        /*
+         * Here we provide a list of device driver classes
+         * that we will use. A class can be repeated in order
+         * to instantiate multiple instances of the same device,
+         * separated by using a multiplexer or placing them each
+         * on on a separate i2c bus.
+         *
+         * I2CSensorBus will scan the bus looking for these
+         * specific devices and the scan will be repeated periodically
+         * until it finds a matching i2c device for every class
+         * referenced in this list:
+         */
+        val expectedDeviceClasses = listOf(
+            // 1 temperature sensor:
+            SHT40Sensor,
+            // 2 ambient light sensors:
+            AS7343Sensor,
+            AS7343Sensor
+        )
+        
+        // Pass the list to `.expect()` so that I2CSensorBus knows
+        // which device addresses to scan for.
+        //
+        // Notice that you do not specify which port each sensor is
+        // attached to. The I2CSensorBus takes care of detecting them
+        // wherever they are attached, directly or via an i2c multiplexer.
+        I2CSensorBus.expect(expectedDeviceClasses)
+        
+        
+        try {
+            // Start the background jobs, this will create 1 coroutine per port and a single dedicated IO thread for all I2C operations.
+            for (port in ports) {
+                port.start()
+            }
+            
+            while (isActive) {
+                // Here's an example of repeatedly reading the sensor state:
+                
+                // sensorData is immutable, each time you call
+                // getAllSensorState it returns a structure with
+                // the newest reading from each active sensor:
+                val sensorData = I2CSensorBus.getAllSensorState()
+                        .values
+                        .toList()
+                // the data can be filtered and iterated conveniently:
+                sensorData.filter { it.connected }.forEach {
+                    // do something with sensor readings:
+                    when (it) {
+                        is TemperatureSensorState -> {
+                            // do something with SHT40Sensor readings
+                            val temperature = it.temperature.toFloat()
+                            val humidity = it.humidity.toFloat()
+                        }
+                        is ColorSensorState       -> {
+                            // do something with AS7343Sensor readings...
+                        }
+                    }
+                }
+            
+            }
+        } finally {
+            // clean up in case of a CancellationException or other
+            // unexpected / uncaught exception.
+            
+            for (port in ports) {
+                // cancel the coroutines when they are no longer needed:
+                port.cancel()
+            }
+        }
+    }
+}
+```
+
+Note that the coroutine and `while(isActive)` loop in the above example are not actually necessary
+in order to utilize I2CSensorBus. You can just call `.start()` on one or more ports and then call
+`I2CSensorBus.getAllSensorState()` as needed. After you call `.start()` the I2CSensorBus has already
+launched a background thread that is constantly polling the sensors for new data so an additional
+polling loop is somewhat supurfulous.
 
 ## API Documentation
 
