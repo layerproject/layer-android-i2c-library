@@ -1,6 +1,7 @@
 package com.layer.i2c
 
 import android.util.Log
+import com.layer.hardware.DeviceUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,7 +26,7 @@ open class Expectation(
  */
 @OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
 class I2CSensorBus(val busPath: String) {
-    
+    var i2cBusDescriptor : Int = -1
     var multiplexer : TCA9548Multiplexer? = null
     var lastRescanTime = 0L
     var errorCounter = 0
@@ -73,6 +74,26 @@ class I2CSensorBus(val busPath: String) {
         fun getSensorState(sensorId : String) : SensorState? {
             return latestSensorState[sensorId]
         }
+        
+        fun initPorts():MutableList<I2CSensorBus> {
+            val ports = mutableListOf(
+                getInstance(0)
+            )
+            val serialNumber = DeviceUtils.getSerialNumber()
+            // only use port 1 on a select list of early device serial numbers:
+            val usesPort1 = listOf("3cc0ef17", "6aceb0a1", "6b52867a", "8b11ea02", "92cd665f", "122ff29e", "715d8296", "b89d02a6", "c1e07642", "e593b0da", "fe5064cd" )
+            if (usesPort1.contains(serialNumber)) {
+                Log.i(TAG, "Connecting i2c port /dev/i2c-1 because serialnumber ${serialNumber} is in the allow list.")
+                ports.add(getInstance(1))
+            }
+            // these sensors are expected to be present on all layer devices, usually connected to port 0:
+            expect(listOf(SHT40Sensor, AS7343Sensor, AS7343Sensor))
+            for (port in ports) {
+                port.start()
+            }
+            return ports
+        }
+        
     }
     
     fun logException(e: Throwable){
@@ -81,6 +102,8 @@ class I2CSensorBus(val busPath: String) {
     fun logException(msg: String?, e: Throwable) {
         Log.e(TAG, msg ?: e.toString(), e)
     }
+    
+    
     
     suspend fun initSensors(devices : MutableList<DeviceInfo>) : MutableSet<I2CSensor> {
         val sensors : MutableSet<I2CSensor> = mutableSetOf()
@@ -268,8 +291,6 @@ class I2CSensorBus(val busPath: String) {
                                     Log.e(TAG, "Sensor $sensor returned empty data. Marking sensor as disconnected")
                                     errorCounter++
                                     reconnectList.add(sensor)
-                                    delay(SENSOR_READ_DELAY_MS)  // Delay after sensor read error
-                                    
                                 } else if (data.containsKey("ERROR")) {
                                     Log.e(
                                         TAG,
@@ -277,15 +298,12 @@ class I2CSensorBus(val busPath: String) {
                                     )
                                     errorCounter++
                                     reconnectList.add(sensor)
-                                    delay(SENSOR_READ_DELAY_MS)  // Delay after sensor read error
-                                    
                                 } else {
                                     Log.d(TAG, "Sensor $sensor returned data: $data")
-                                    delay(SENSOR_READ_DELAY_MS)  // Delay after successful sensor read, before any other I2C operations
                                     val sensorId = sensor.deviceUniqueId()
                                     latestSensorState[sensorId] = sensor.getSensorState()
                                 }
-                                
+                                delay(SENSOR_READ_DELAY_MS)  // Delay after successful sensor read, before any other I2C operations
                             }
                         } catch (e : IOException) {
                             Log.e(TAG, "Error reading from sensor $sensor: ${e.message}")
@@ -373,16 +391,18 @@ class I2CSensorBus(val busPath: String) {
                     // now clean up multiplexers (if any)
                     multiplexer.connect()
                     multiplexer.disableAllChannels()
-                    tryDisconnectSafely(multiplexer)
                 } catch(e:Exception) {
                     logException(e)
                 }
+                tryDisconnectSafely(multiplexer)
             }
         } finally {
             this.multiplexer = null
             mappedSensors.clear()
             allSensors.clear()
             reconnectList.clear()
+            //make sure the bus is closed:
+            I2CBusManager.getInstance().closeBus(busPath, 112)
         }
     }
 }

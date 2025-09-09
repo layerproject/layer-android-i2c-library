@@ -42,7 +42,6 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                 val readings : MutableList<Float> = mutableListOf()
                 var sumOfTemps = 0F
                 for (zone in zones) {
-                    
                     try {
                         val file = File(zone)
                         if (file.canRead()) {

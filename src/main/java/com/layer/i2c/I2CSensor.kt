@@ -175,7 +175,7 @@ abstract class I2CSensor(
      * Return the last recorded error message, if any.s
      */
     public open fun lastError() : String? {
-        return lastErrorMessage
+        return this.lastErrorMessage
     }
 
     public open fun logError(tag:String, msg: String, e: Throwable?=null) {
@@ -193,6 +193,10 @@ abstract class I2CSensor(
         override val connected = isConnected()
         override val updateTS = System.currentTimeMillis()
         override val sensorId = this@I2CSensor.toString()
+    }
+    
+    public open fun shouldUpdateState(): Boolean {
+        return true
     }
     
     /**

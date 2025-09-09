@@ -1,6 +1,9 @@
 package com.layer.i2c
 
 import android.util.Log
+import java.lang.Math.log
+import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.min
 
 /**
@@ -44,6 +47,8 @@ open class AS7343Sensor : I2CSensor {
         "F1" to 0, "F2" to 0, "F3" to 0, "F4" to 0,
         "F5" to 0, "F6" to 0, "F7" to 0, "F8" to 0
     )
+    
+    private var updateTS : Long = 0
     
     companion object : SensorFactory<I2CSensor> {
         
@@ -272,17 +277,25 @@ open class AS7343Sensor : I2CSensor {
     override fun getSensorState() = object : ColorSensorState {
         override val errorMessage = lastError()
         override val connected = this@AS7343Sensor.isConnected()
-        override val updateTS = System.currentTimeMillis()
+        override val updateTS = this@AS7343Sensor.updateTS
         override val sensorId = this@AS7343Sensor.toString()
         override val channelData :  Map<String, Int> = getLatestChannelData().toMap()
     }
     
+    override fun shouldUpdateState(): Boolean {
+        // adjust update rate based on magnitude of the last change in brightness.
+        val timeDiff = System.currentTimeMillis() - updateTS;
+        val lightDiff:Double = abs(primaryChannelData["total_change"] ?: 0).toDouble()
+        val timeStep = 1000 + (5000 * (1.0 / ln(lightDiff)))
+        return (timeDiff > timeStep)
+    }
+    
     override fun readDataImpl(): Map<String, Int> {
         val read = readSpectralDataOnce()
-        if (read.isEmpty()) {
-            return read
+        return if (read.isEmpty()) {
+            read
         } else {
-            return this.primaryChannelData!!
+            this.primaryChannelData
         }
     }
     
@@ -396,13 +409,19 @@ open class AS7343Sensor : I2CSensor {
      */
     private fun extractPrimaryChannels(rawData: Map<String, Int>): Map<String, Int> {
         val primaryMap = mutableMapOf<String, Int>()
+        var totalChange: Int = 0
         primaryChannelKeys.forEachIndexed { index, key ->
             val simpleName = primaryChannelSimpleNames.getOrElse(index) { key } // Use simple name
             primaryMap[simpleName] = rawData[key] ?: 0 // Get value using the register-based key
-            primaryChannelData?.set(simpleName,
-                rawData[key] ?: (primaryChannelData?.get(simpleName) ?: 0)
-            )
+            val previousVal = (primaryChannelData[simpleName] ?: 0)
+            val newVal = rawData[key] ?: 0
+            val diff = newVal - previousVal
+            primaryChannelData[simpleName] = newVal
+            primaryChannelData[simpleName + "_change"] = diff
+            totalChange += diff
         }
+        updateTS = System.currentTimeMillis()
+        primaryMap["total_change"] = totalChange
         return primaryMap
     }
 
