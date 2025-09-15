@@ -270,7 +270,7 @@ class I2CSensorBus(val busPath: String) {
                         }
                     }
                     
-                    for (sensor in allSensors) {
+                    for (sensor in allSensors.toList()) {
                         try {
                             if (!sensor.isReady()) {
                                 try {
@@ -380,7 +380,7 @@ class I2CSensorBus(val busPath: String) {
         try {
             errorCounter = 0
             // Clean up attached sensors before multiplexers.
-            for (sensor in allSensors) {
+            for (sensor in allSensors.toList()) {
                 if (sensor !is TCA9548Multiplexer) {
                     tryDisconnectSafely(sensor)
                 }
