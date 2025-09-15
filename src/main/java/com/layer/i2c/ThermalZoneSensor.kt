@@ -16,7 +16,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 
-open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, context : CoroutineDispatcher = Dispatchers.IO)  : DeviceNodeSensor<String>(initialValue, context)  {
+open class ThermalZoneSensor(initialValue: Float = 0.0f, val zoneIds: IntRange, context : CoroutineDispatcher = Dispatchers.IO)  : DeviceNodeSensor<Float>(initialValue, context)  {
     companion object {
         const val TAG = "ThermalZoneSensor"
     }
@@ -30,11 +30,8 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
         val job = CoroutineScope(context).launch {
             fun err(error : String) {
                 logError("$valueLabel sensor error: $error")
-                if (fields.containsKey("error")){
-                    fields["error"]?.value = error
-                } else {
-                    fields["error"] = mutableStateOf(error)
-                }
+                // Store error in lastErrorMessage instead of fields since fields is Float type
+                lastErrorMessage = error
             }
             
             while (isActive) {
@@ -55,9 +52,9 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                         }
                     } catch (e : SecurityException) {
                         err("Cannot access thermal zone: $zone")
-                        state.value = "N/A";
+                        state.value = 0.0f;
                     } catch (e : Exception) {
-                        state.value = "Error"
+                        state.value = 0.0f
                         Log.e(TAG, "Unexpected Error:", e)
                     }
                     index = (index + 1) % zones.size
@@ -75,7 +72,7 @@ open class ThermalZoneSensor(initialValue: String = "", val zoneIds: IntRange, c
                     tMax = max(tMax, temp)
                 }
                 val stdDev = tVar / readings.size
-                state.value = String.format("%.1f°C", tMean)
+                state.value = tMean
                 if (tMin <= 0 ) {
                     err("Sensor out of range: tMin is <= 0c")
                 } else if (tMax > 99) {
