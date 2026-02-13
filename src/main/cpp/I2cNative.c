@@ -3,22 +3,61 @@
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
 #include <unistd.h>
+#include <sched.h>
+#include <time.h>
+#include <errno.h>
 
 #include <syslog.h>
 #include <jni.h>
 
 #include "I2cNative.h"
 
+// Minimum interval between I2C operations in nanoseconds (250 microseconds).
+// Prevents interrupt clustering that causes rendering jank.
+#define MIN_I2C_INTERVAL_NS 250000L
+
+static struct timespec last_i2c_time = {0, 0};
+
+static inline void i2c_rate_limit(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    if (last_i2c_time.tv_sec != 0 || last_i2c_time.tv_nsec != 0) {
+        long elapsed_ns = (now.tv_sec - last_i2c_time.tv_sec) * 1000000000L
+                        + (now.tv_nsec - last_i2c_time.tv_nsec);
+        if (elapsed_ns < MIN_I2C_INTERVAL_NS) {
+            struct timespec sleep_time;
+            long remaining = MIN_I2C_INTERVAL_NS - elapsed_ns;
+            sleep_time.tv_sec = 0;
+            sleep_time.tv_nsec = remaining;
+            nanosleep(&sleep_time, NULL);
+        }
+    }
+}
+
+static inline void i2c_post_operation(void)
+{
+    clock_gettime(CLOCK_MONOTONIC, &last_i2c_time);
+    sched_yield();
+}
+
 static inline __s32 i2c_smbus_access(int file, char read_write, __u8 command
         , int size, union i2c_smbus_data *data)
 {
     struct i2c_smbus_ioctl_data args;
 
+    i2c_rate_limit();
+
     args.read_write = read_write;
     args.command = command;
     args.size = size;
     args.data = data;
-    return ioctl(file, I2C_SMBUS, &args);
+    __s32 result = ioctl(file, I2C_SMBUS, &args);
+
+    i2c_post_operation();
+
+    return result;
 }
 
 /**
@@ -30,7 +69,10 @@ static inline int switch_i2c_device(int fd, __u8 deviceAddress)
     if (fd < 0) {
         return -1;
     }
-    return ioctl(fd, I2C_SLAVE, deviceAddress);
+    i2c_rate_limit();
+    int result = ioctl(fd, I2C_SLAVE, deviceAddress);
+    i2c_post_operation();
+    return result;
 }
 
 static inline __s32 i2c_smbus_read_i2c_block_data(int file, __u8 command,
@@ -179,7 +221,9 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
     
     // Read data directly from the I2C device
     // This is for reading after a command has been sent
+    i2c_rate_limit();
     int bytesRead = read(fd, buffer, length);
+    i2c_post_operation();
 
     openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
     syslog(LOG_DEBUG, "I2C %d bytes read on FD: %d", bytesRead, fd);
@@ -195,11 +239,54 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
     return bytesRead;
 }
 
+/**
+ * Reads a block of bytes starting from a register address using SMBus I2C block read.
+ * Handles reads larger than 32 bytes by performing multiple sequential reads.
+ *
+ * @param fd       File descriptor for the I2C bus
+ * @param reg      Starting register address
+ * @param jbuffer  Java byte array to store the data
+ * @param length   Number of bytes to read
+ * @return Total number of bytes read, or -1 if error
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readBlockData
+        (JNIEnv *env, jclass jcl, jint fd, jint reg, jbyteArray jbuffer, jint length)
+{
+    if (length <= 0 || length > 256) {
+        return -1;
+    }
+
+    __u8 buffer[256] = {0};
+    int totalRead = 0;
+    int remaining = length;
+    __u8 currentReg = reg & 0xFF;
+
+    while (remaining > 0) {
+        __u8 chunkSize = remaining > 32 ? 32 : (__u8)remaining;
+        __s32 bytesRead = i2c_smbus_read_i2c_block_data(fd, currentReg, chunkSize, buffer + totalRead);
+        if (bytesRead <= 0) {
+            if (totalRead == 0) {
+                return -1; // First read failed
+            }
+            break; // Return what we have so far
+        }
+        totalRead += bytesRead;
+        remaining -= bytesRead;
+        currentReg += bytesRead;
+    }
+
+    (*env)->SetByteArrayRegion(env, jbuffer, 0, totalRead, (jbyte*)buffer);
+    return totalRead;
+}
+
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
         (JNIEnv *env, jclass jcl, jint fd, jint value)
 {
     __u8 byte = value & 0xFF;
-    return write(fd, &byte, 1);
+    i2c_rate_limit();
+    int result = write(fd, &byte, 1);
+    i2c_post_operation();
+    return result;
 }
 
 /**
@@ -379,4 +466,26 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_recoverBus
     syslog(LOG_ERR, "All I2C bus recovery methods failed on FD: %d", fd);
     closelog();
     return -1;
+}
+
+/**
+ * Sets the calling thread to SCHED_IDLE scheduling policy.
+ * SCHED_IDLE is the absolute lowest scheduling priority in Linux —
+ * the thread only runs when no other thread on the system wants CPU time.
+ * Perfect for background I2C sensor polling that must never interfere with rendering.
+ *
+ * @return 0 if successful, -1 if error (errno will contain the reason)
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_setSchedIdle
+        (JNIEnv *env, jclass jcl)
+{
+    struct sched_param param;
+    param.sched_priority = 0; // SCHED_IDLE requires priority 0
+    int result = sched_setscheduler(0, SCHED_IDLE, &param);
+    if (result < 0) {
+        openlog("I2cNative", LOG_PID | LOG_CONS, LOG_USER);
+        syslog(LOG_WARNING, "Failed to set SCHED_IDLE: errno=%d", errno);
+        closelog();
+    }
+    return result;
 }

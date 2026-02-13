@@ -1,6 +1,7 @@
 package com.layer.i2c
 
 import android.util.Log
+import kotlinx.coroutines.delay
 
 /**
  * SHT40 Temperature and Humidity Sensor implementation.
@@ -46,6 +47,9 @@ open class SHT40Sensor : I2CSensor {
     
     // SHT40 I2C address (0x44 is the default address)
     override val sensorAddress: Int = 0x44
+
+    // Temperature/humidity is low priority — read at most every 30 seconds
+    override val minReadIntervalMs: Long = 30_000L
     
     // Temperature and humidity values
     var temperature: Double = DEFAULT_TEMPERATURE
@@ -69,7 +73,7 @@ open class SHT40Sensor : I2CSensor {
         return try {
             Log.d(TAG, "Initializing SHT40 sensor on fd=$fileDescriptor")
             
-            if (!softReset()) {
+            if (!kotlinx.coroutines.runBlocking { softReset() }) {
                 logError(TAG, "SHT40 sensor soft reset command failed")
                 return false
             }
@@ -81,23 +85,24 @@ open class SHT40Sensor : I2CSensor {
         }
     }
     
-    private fun softReset(): Boolean {
+    private suspend fun softReset(): Boolean {
+        val writeResult: Int
         val lock = fdLock ?: this
-        
+
         synchronized(lock) {
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 logError(TAG, "Failed switching to device ahead of sending command")
                 return false
             }
-            
-            val writeResult = I2cNative.write(fileDescriptor, 0x94)
+
+            writeResult = I2cNative.write(fileDescriptor, 0x94)
             Log.d(TAG, "Soft reset command result on SHT40: $writeResult")
-            
-            Thread.sleep(100)
-            // SHT40 needs about 100ms to soft reset
-            
-            return writeResult == 1
         }
+
+        // SHT40 needs about 100ms to soft reset - delay outside lock
+        delay(100)
+
+        return writeResult == 1
     }
     
     private fun calculateCRC8(data: ByteArray, offset: Int, length: Int): Int {
@@ -133,24 +138,24 @@ open class SHT40Sensor : I2CSensor {
      * Uses transaction-level locking to ensure atomic operation across all I2C calls.
      * @return Map containing temperature and humidity data
      */
-    override fun readDataImpl(): Map<String, Int> {
+    override suspend fun readDataImpl(): Map<String, Int> {
         if (!isReady()) {
             return mapOf("ERROR" to 65535)
         }
-        
+
         return executeTransaction {
             try {
-                
+
                 // Entire SHT40 operation is now atomic
                 val writeResult = I2cNative.write(fileDescriptor, CMD_MEASURE_HIGH_PRECISION)
                 Log.d(TAG, "Measure temperature and humidity with high precision on SHT40: $writeResult")
-                
+
                 if (writeResult != 1) {
                     logError(TAG, "Failed to send measurement command to SHT40")
                     mapOf("ERROR" to 65535)
                 } else {
-                    // SHT40 needs about 100ms to complete the measurement
-                    Thread.sleep(100)
+                    // SHT40 high-precision measurement completes in 8.2ms max per datasheet
+                    delay(15)
                 }
                 // Read 6 bytes: 2 for temperature, 1 CRC, 2 for humidity, 1 CRC
                 val buffer = ByteArray(6)

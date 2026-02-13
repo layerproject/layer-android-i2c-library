@@ -40,7 +40,7 @@ open class TCA9548Multiplexer(
         const val MAX_CHANNELS = 8
         
         // Delay after channel switch to allow bus stabilization
-        const val CHANNEL_SWITCH_DELAY_MS = 100L
+        const val CHANNEL_SWITCH_DELAY_MS = 5L
         
         // Error codes
         const val ERROR_OK = 0
@@ -72,7 +72,7 @@ open class TCA9548Multiplexer(
             val validMask = 0 and ((1 shl maxChannels) - 1)
             
             synchronized(fdLock ?: this) {
-                if (!switchToDevice()) {
+                if (!switchToDeviceBlocking()) {
                     connected = false
                     throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
                 }
@@ -107,7 +107,7 @@ open class TCA9548Multiplexer(
         override val deviceSummary = "Multiplexer ${busPath} address 0x${multiplexerAddress.toString(16)}: Devices: ${deviceMap.toString()}"
     }
     
-    override fun readDataImpl(): Map<String, Int> {
+    override suspend fun readDataImpl(): Map<String, Int> {
         if (!isReady()) {
             return mapOf("ERROR" to 65535)
         }
@@ -140,10 +140,10 @@ open class TCA9548Multiplexer(
         // For TCA9548, reading from the device returns the current channel mask
         // Use raw I2C read since TCA9548 doesn't use registers
         synchronized(fdLock ?: this) {
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
             }
-            
+
             val result = I2cNative.readWord(fileDescriptor, 0)
             if (result < 0) {
                 throw IOException("Failed to read channel mask from multiplexer: I2C error $result")
@@ -151,7 +151,7 @@ open class TCA9548Multiplexer(
             return result and 0xFF
         }
     }
-    
+
     /**
      * Read the current channel mask from the multiplexer during initialization.
      * This version doesn't check isReady() since it's called during initializeSensor().
@@ -161,14 +161,14 @@ open class TCA9548Multiplexer(
         if (fileDescriptor < 0) {
             throw IOException("Multiplexer file descriptor not valid")
         }
-        
+
         // For TCA9548, reading from the device returns the current channel mask
         // Use raw I2C read since TCA9548 doesn't use registers
         synchronized(fdLock ?: this) {
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
             }
-            
+
             val result = I2cNative.readWord(fileDescriptor, 0)
             if (result < 0) {
                 throw IOException("Failed to read channel mask from multiplexer: I2C error $result")
@@ -186,9 +186,9 @@ open class TCA9548Multiplexer(
         if (!isReady()) {
             throw IOException("Multiplexer not connected")
         }
-        
+
         val validMask = mask and ((1 shl maxChannels) - 1)
-        
+
         synchronized(fdLock ?: this) {
             var errorCount = 0
             // this will repeat once if the i2c bus recovery succeeds in the catch block at tht end of the loop.
@@ -196,10 +196,10 @@ open class TCA9548Multiplexer(
             // bail by throwing the exception up the stack.
             while(true) {
                 try {
-                    if (!switchToDevice()) {
+                    if (!switchToDeviceBlocking()) {
                         throw IOException("Failed to switch to multiplexer 0x${multiplexerAddress.toString(16)}")
                     }
-                    
+
                     // Simple single-byte write to TCA9548 - just like reference libraries
                     val result = I2cNative.write(fileDescriptor, validMask)
                     if (result < 0) {
@@ -208,9 +208,7 @@ open class TCA9548Multiplexer(
                     // Update cached value and log success
                     currentChannelMask = validMask
                     Log.d(TAG, "Set multiplexer channel mask to 0x${validMask.toString(16)}")
-                    // Add delay after channel switch to allow I2C bus and devices to stabilize
-                    Thread.sleep(CHANNEL_SWITCH_DELAY_MS)
-                    return
+                    break
                 } catch (e : IOException) {
                     errorCount++;
                     Log.e(TAG, "Error writing channel mask. Attempting to recover", e);
@@ -226,6 +224,9 @@ open class TCA9548Multiplexer(
                 }
             }
         }
+        // Delay outside synchronized block — TCA9548 propagation delay is <30ns,
+        // but allow a small stabilization window
+        Thread.sleep(CHANNEL_SWITCH_DELAY_MS)
     }
     
     /**
@@ -492,7 +493,7 @@ open class TCA9548Multiplexer(
                 channelDevices[channel] = emptyList()
                 
                 // Simple delay before continuing - avoid complex recovery that might worsen things
-                Thread.sleep(10)
+                try { Thread.sleep(10) } catch (_: InterruptedException) {}
             }
         }
         

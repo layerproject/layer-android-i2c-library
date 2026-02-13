@@ -42,7 +42,7 @@ class I2CSensorBus(val busPath: String) {
         var allSensors : MutableSet<I2CSensor> = mutableSetOf()
         private const val TAG = "I2CBusManager"
         private val context = newSingleThreadContext("I2CBusThread")
-        // Fixed delay after each sensor read (in milliseconds)
+        // Breathing room between consecutive sensor reads (in milliseconds)
         private const val SENSOR_READ_DELAY_MS = 100L
         // Singleton instance
         private val port0 = I2CSensorBus("/dev/i2c-0")
@@ -250,6 +250,16 @@ class I2CSensorBus(val busPath: String) {
         }
 
         ioJob = CoroutineScope(context).launch {
+            // Set absolute lowest scheduling priority — SCHED_IDLE threads only run
+            // when no other thread on the system wants CPU time
+            val schedResult = I2cNative.setSchedIdle()
+            if (schedResult < 0) {
+                // Fallback to nice-based deprioritization if SCHED_IDLE not available
+                Log.w(TAG, "SCHED_IDLE not available, falling back to THREAD_PRIORITY_LOWEST")
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+            } else {
+                Log.i(TAG, "I2C thread set to SCHED_IDLE scheduling policy")
+            }
             scanForSensors()
             // update interval is divided between the delay at the end of the for loop and
             // another delay at the end of the while loop
@@ -286,6 +296,13 @@ class I2CSensorBus(val busPath: String) {
                                 }
                             }
                             if (sensor.isReady()) {
+                                // Skip this sensor if its minimum read interval hasn't elapsed
+                                if (sensor.minReadIntervalMs > 0) {
+                                    val elapsed = currentTime - sensor.lastReadTime
+                                    if (sensor.lastReadTime > 0 && elapsed < sensor.minReadIntervalMs) {
+                                        continue
+                                    }
+                                }
                                 val data = sensor.readData()
                                 if (data.isEmpty()) {
                                     Log.e(TAG, "Sensor $sensor returned empty data. Marking sensor as disconnected")

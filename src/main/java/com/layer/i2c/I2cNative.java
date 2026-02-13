@@ -81,6 +81,18 @@ public class I2cNative {
     public static native int readRawBytes(int fd, byte[] buffer, int length);
 
     /**
+     * Reads a block of bytes from a register address using SMBus I2C block read.
+     * Supports reading more than 32 bytes by performing multiple reads.
+     *
+     * @param fd         file descriptor of i2c bus
+     * @param register   starting register address
+     * @param buffer     buffer to store the data
+     * @param length     number of bytes to read
+     * @return number of bytes read, or negative value if error
+     */
+    public static native int readBlockData(int fd, int register, byte[] buffer, int length);
+
+    /**
      * Writes one byte inside the i2c bus.
      *
      * @param fd            file descriptor of i2c bus
@@ -118,4 +130,15 @@ public class I2cNative {
      * @return 0 if recovery successful, -1 if recovery failed
      */
     public static native int recoverBus(int fd);
+
+    /**
+     * Sets the calling thread to SCHED_IDLE scheduling policy.
+     * SCHED_IDLE is the absolute lowest scheduling priority in Linux —
+     * the thread only runs when no other thread on the system wants CPU time.
+     * This is ideal for background I2C sensor polling that must never interfere
+     * with rendering or other interactive work.
+     *
+     * @return 0 if successful, -1 if error
+     */
+    public static native int setSchedIdle();
 }

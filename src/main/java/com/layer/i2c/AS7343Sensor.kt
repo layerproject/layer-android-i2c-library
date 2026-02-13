@@ -1,6 +1,7 @@
 package com.layer.i2c
 
 import android.util.Log
+import kotlinx.coroutines.delay
 import java.lang.Math.log
 import kotlin.math.abs
 import kotlin.math.ln
@@ -32,6 +33,9 @@ open class AS7343Sensor : I2CSensor {
     
     // Default address for AS7343 sensor
     override val sensorAddress: Int = 0x39
+
+    // Spectral reads are moderately expensive — read at most every 5 seconds
+    override val minReadIntervalMs: Long = 5_000L
     
     // Register and bit definitions
     private val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB
@@ -124,7 +128,7 @@ open class AS7343Sensor : I2CSensor {
                 "direct connection"
             }
             Log.d(TAG, "Disconnecting sensor on $busPath ($locationInfo) (fd=$fileDescriptor)...")
-            
+
             // Attempt to power down before closing
             if (isInitialized) { // Only try if we think it was initialized
                 try {
@@ -153,7 +157,6 @@ open class AS7343Sensor : I2CSensor {
      *
      * @param useBank1 True to select Bank 1, false to select Bank 0
      */
-    @Synchronized
     private fun setBankDirect(useBank1: Boolean) {
         if (fileDescriptor < 0) return
 
@@ -193,7 +196,6 @@ open class AS7343Sensor : I2CSensor {
      *
      * @param on True to power on, false to power off
      */
-    @Synchronized
     private fun togglePower(on: Boolean) {
         if (fileDescriptor < 0) return
         try {
@@ -209,8 +211,7 @@ open class AS7343Sensor : I2CSensor {
     /**
      * Enables or disables spectral measurement.
      */
-    @Synchronized
-    private fun enableSpectralMeasurement(enableMeasurement: Boolean) {
+    private suspend fun enableSpectralMeasurement(enableMeasurement: Boolean) {
         try {
             setBank(false) // Ensure Bank 0
             if (enableMeasurement) {
@@ -219,7 +220,7 @@ open class AS7343Sensor : I2CSensor {
                 if (enableReg and (1 shl BIT_POWER) == 0) {
                     Log.w(TAG, "Warning: Enabling measurement while power is OFF. Enabling power first.")
                     togglePower(true)
-                    Thread.sleep(1) // Small delay after power on
+                    delay(1) // Small delay after power on
                 }
             }
             enableBit(REG_ENABLE, BIT_MEASUREMENT, enableMeasurement)
@@ -231,7 +232,6 @@ open class AS7343Sensor : I2CSensor {
     /**
      * Sets the integration time for spectral measurements.
      */
-    @Synchronized
     private fun setIntegrationTime(atime: Int, astep: Int) {
         if (fileDescriptor < 0) return
         val safeAtime = atime.coerceIn(0, 255)
@@ -244,7 +244,6 @@ open class AS7343Sensor : I2CSensor {
         setIntegrationTimeInternal(safeAtime, safeAstep)
     }
 
-    @Synchronized
     private fun setIntegrationTimeInternal(atime: Int, astep: Int) {
         try {
             Log.d(TAG, "Setting ATIME=$atime, ASTEP=$astep on fd=$fileDescriptor")
@@ -261,7 +260,6 @@ open class AS7343Sensor : I2CSensor {
      * @param againValue Gain value (typically 0-12, where higher values mean higher sensitivity)
      *   0=0.5x, 4=16x, 8=128x, 9=256x(default), 10=512x, 12=2048x
      */
-    @Synchronized
     private fun setGain(againValue: Int) {
         if (fileDescriptor < 0) return
         val safeAgain = againValue.coerceIn(0, 12)
@@ -290,7 +288,7 @@ open class AS7343Sensor : I2CSensor {
         return (timeDiff > timeStep)
     }
     
-    override fun readDataImpl(): Map<String, Int> {
+    override suspend fun readDataImpl(): Map<String, Int> {
         val read = readSpectralDataOnce()
         return if (read.isEmpty()) {
             read
@@ -309,7 +307,7 @@ open class AS7343Sensor : I2CSensor {
      * connect/disconnect externally.
      * @return Map of primary channel names to values, or empty map if read fails.
      */
-    fun readSpectralDataOnce(): Map<String, Int> {
+    suspend fun readSpectralDataOnce(): Map<String, Int> {
         // Ensure connected and initialized
         if (!connect()) {
             return emptyMap()
@@ -330,7 +328,7 @@ open class AS7343Sensor : I2CSensor {
      * Call connect() before using this, and disconnect() when done.
      * @return Map of primary channel names to values, or empty map if not initialized or read fails.
      */
-    fun readSpectralData(): Map<String, Int> {
+    suspend fun readSpectralData(): Map<String, Int> {
         if (!isInitialized) {
             Log.e(TAG, "Sensor not initialized. Call connect() first.")
             return emptyMap()
@@ -344,20 +342,19 @@ open class AS7343Sensor : I2CSensor {
      * @param maxRetries Maximum number of retry attempts
      * @return Map of primary channel names to values, or empty map if all retries fail
      */
-    @Synchronized
-    private fun readSpectralDataWithRetry(maxRetries: Int): Map<String, Int> {
+    private suspend fun readSpectralDataWithRetry(maxRetries: Int): Map<String, Int> {
         var attempt = 0
         var lastException: Exception? = null
 
         while (attempt <= maxRetries) {
             try {
                 Log.d(TAG, "Attempting spectral data read (attempt ${attempt + 1}/${maxRetries + 1}) on fd=$fileDescriptor")
-                
+
                 val rawData = readAllChannels()
 
                 if (rawData.isNotEmpty()) {
                     Log.d(TAG, "Spectral data read successful on attempt ${attempt + 1} for fd=$fileDescriptor")
-                    
+
                     return extractPrimaryChannels(rawData)
                 } else {
                     Log.w(TAG, "Read returned empty data on attempt ${attempt + 1} for fd=$fileDescriptor")
@@ -366,7 +363,7 @@ open class AS7343Sensor : I2CSensor {
             } catch (e: Exception) {
                 lastException = e
                 Log.w(TAG, "Read attempt ${attempt + 1} failed for fd=$fileDescriptor: ${e.message}")
-                
+
                 // If it's an I2C error and we have retries left, try recovery
                 if (e.message?.contains("I2C") == true && attempt < maxRetries) {
                     Log.w(TAG, "I2C error on attempt ${attempt + 1}, attempting recovery on fd=$fileDescriptor")
@@ -383,18 +380,12 @@ open class AS7343Sensor : I2CSensor {
             }
 
             attempt++
-            
+
             // Exponential backoff before retry (if we have more attempts)
             if (attempt <= maxRetries) {
                 val backoffTime = min((50 * Math.pow(2.0, (attempt - 1).toDouble())).toLong(), 500L)
                 Log.d(TAG, "Waiting ${backoffTime}ms before retry attempt $attempt on fd=$fileDescriptor")
-                try {
-                    Thread.sleep(backoffTime)
-                } catch (ie: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    Log.w(TAG, "Retry backoff interrupted for fd=$fileDescriptor")
-                    break
-                }
+                delay(backoffTime)
             }
         }
 
@@ -435,7 +426,9 @@ open class AS7343Sensor : I2CSensor {
         Log.d(TAG, "Initializing sensor on fd=$fileDescriptor...")
         try {
             // Perform proper Power-On Reset sequence as per datasheet
-            return performProperPowerOnReset()
+            return kotlinx.coroutines.runBlocking {
+                performProperPowerOnReset()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "EXCEPTION during sensor initialization for fd=$fileDescriptor", e)
             Log.e(TAG, "Initialization exception type: ${e.javaClass.simpleName}")
@@ -459,23 +452,22 @@ open class AS7343Sensor : I2CSensor {
      * This ensures the sensor is in a known good state before configuration.
      * @return true if initialization succeeds, false otherwise.
      */
-    @Synchronized
-    private fun performProperPowerOnReset(): Boolean {
+    private suspend fun performProperPowerOnReset(): Boolean {
         Log.d(TAG, "Performing proper Power-On Reset sequence on fd=$fileDescriptor")
-        
+
         try {
             // Step 1: Ensure we start from a clean state - power off first
             Log.d(TAG, "Step 1: Setting Bank 0 and powering off sensor on fd=$fileDescriptor")
             setBank(false) // Ensure Bank 0
             togglePower(false)
-            Thread.sleep(5) // Wait for power down
+            delay(5) // Wait for power down
             Log.d(TAG, "Step 1 completed: Sensor powered off on fd=$fileDescriptor")
-            
+
             // Step 2: Power on and wait for stabilization
             // Datasheet specifies 200μs initialization time after power-on
             Log.d(TAG, "Step 2: Powering on sensor on fd=$fileDescriptor")
             togglePower(true)
-            Thread.sleep(1) // Wait for internal initialization (>200μs)
+            delay(1) // Wait for internal initialization (>200μs)
             Log.d(TAG, "Step 2 completed: Sensor powered on, waiting for stabilization on fd=$fileDescriptor")
             
             // Step 3: Verify sensor is responsive after power-on
@@ -550,8 +542,7 @@ open class AS7343Sensor : I2CSensor {
      * Assumes sensor is initialized.
      * @return Map containing all 18 data register values (using names from dataRegisterNames), or empty map on error.
      */
-    @Synchronized
-    private fun readAllChannels(): Map<String, Int> {
+    private suspend fun readAllChannels(): Map<String, Int> {
         if (fileDescriptor < 0) return emptyMap()
 
         return try {
@@ -576,11 +567,26 @@ open class AS7343Sensor : I2CSensor {
                 readByteRegTransaction(AS7343_ASTATUS_REG)
                 // We don't use the value, but reading it clears latched status bits
 
-                // 4. Read Data Registers atomically
-                for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
-                    val value = readDataChannelTransaction(i)
-                    val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
-                    channelData[name] = value
+                // 4. Read all data registers in a single block read (36 bytes for 18 channels)
+                val dataBytes = ByteArray(AS7343_NUM_DATA_REGISTERS * 2)
+                val bytesRead = I2cNative.readBlockData(fileDescriptor, AS7343_DATA0_L_REG, dataBytes, dataBytes.size)
+                if (bytesRead == dataBytes.size) {
+                    // Parse 18 little-endian 16-bit values
+                    for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
+                        val lo = dataBytes[i * 2].toInt() and 0xFF
+                        val hi = dataBytes[i * 2 + 1].toInt() and 0xFF
+                        val value = (hi shl 8) or lo
+                        val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
+                        channelData[name] = value
+                    }
+                } else {
+                    // Fallback to individual register reads if block read fails
+                    Log.w(TAG, "Block read returned $bytesRead bytes (expected ${dataBytes.size}), falling back to individual reads on fd=$fileDescriptor")
+                    for (i in 0 until AS7343_NUM_DATA_REGISTERS) {
+                        val value = readDataChannelTransaction(i)
+                        val name = dataRegisterNames.getOrElse(i) { "Unknown_Data_$i" }
+                        channelData[name] = value
+                    }
                 }
 
                 // 5. Disable Spectral Measurement
@@ -609,14 +615,13 @@ open class AS7343Sensor : I2CSensor {
     }
 
 
-    @Synchronized
     private fun getIsDataReady(): Boolean {
         // Use the shared file descriptor lock
         val lock = fdLock ?: this
-        
+
         synchronized(lock) {
             // Ensure we're talking to the right device
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 Log.e(TAG, "Failed to switch device before getIsDataReady")
                 return false
             }
@@ -627,19 +632,13 @@ open class AS7343Sensor : I2CSensor {
         }
     }
 
-    private fun waitForDataReady(timeoutMillis: Long): Boolean {
+    private suspend fun waitForDataReady(timeoutMillis: Long): Boolean {
         val startTime = System.currentTimeMillis()
         while (!getIsDataReady()) {
             if (System.currentTimeMillis() - startTime > timeoutMillis) {
                 return false // Timeout
             }
-            try {
-                Thread.sleep(10) // Polling interval
-            } catch (ie: InterruptedException) {
-                Thread.currentThread().interrupt() // Restore interrupt status
-                Log.w(TAG, "Data wait interrupted for fd=$fileDescriptor")
-                return false
-            }
+            delay(10) // Polling interval
         }
         return true // Data is ready
     }
@@ -647,10 +646,10 @@ open class AS7343Sensor : I2CSensor {
     private fun readDataChannel(channelIndex: Int): Int {
         // Use the shared file descriptor lock
         val lock = fdLock ?: this
-        
+
         synchronized(lock) {
             // Ensure we're talking to the right device
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 Log.e(TAG, "Failed to switch device before readDataChannel")
                 return -1
             }
@@ -671,8 +670,7 @@ open class AS7343Sensor : I2CSensor {
      * This resets the sensor's internal state machine and registers to default values.
      * @return true if the reset was successful, false otherwise
      */
-    @Synchronized
-    fun performSoftwareReset(): Boolean {
+    suspend fun performSoftwareReset(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Cannot perform software reset: invalid file descriptor")
             return false
@@ -680,24 +678,24 @@ open class AS7343Sensor : I2CSensor {
 
         try {
             Log.d(TAG, "Performing software reset on fd=$fileDescriptor")
-            
+
             // Ensure Bank 0 is selected to access CONTROL register
             setBankDirect(false)
-            
+
             // Trigger software reset by setting SW_RESET bit in CONTROL register
             enableBitDirect(AS7343_CONTROL_REG, AS7343_SW_RESET_BIT, true)
-            
+
             // Wait for reset to complete (datasheet recommends minimum 200μs)
-            Thread.sleep(1)
-            
+            delay(1)
+
             // Reset is self-clearing, verify it completed
             val controlReg = readByteRegDirect(AS7343_CONTROL_REG)
             val resetInProgress = (controlReg shr AS7343_SW_RESET_BIT) and 1 == 1
-            
+
             if (resetInProgress) {
                 Log.w(TAG, "Software reset still in progress on fd=$fileDescriptor")
                 // Wait a bit more and check again
-                Thread.sleep(5)
+                delay(5)
                 val controlReg2 = readByteRegDirect(AS7343_CONTROL_REG)
                 val stillInProgress = (controlReg2 shr AS7343_SW_RESET_BIT) and 1 == 1
                 if (stillInProgress) {
@@ -705,10 +703,10 @@ open class AS7343Sensor : I2CSensor {
                     return false
                 }
             }
-            
+
             Log.d(TAG, "Software reset completed successfully on fd=$fileDescriptor")
             return true
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during software reset on fd=$fileDescriptor: ${e.message}", e)
             return false
@@ -720,8 +718,7 @@ open class AS7343Sensor : I2CSensor {
      * This resets the sensor's internal multiplexer that routes photodiode signals to ADCs.
      * @return true if the SMUX reset was successful, false otherwise
      */
-    @Synchronized
-    fun performSMUXReset(): Boolean {
+    suspend fun performSMUXReset(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Cannot perform SMUX reset: invalid file descriptor")
             return false
@@ -729,33 +726,33 @@ open class AS7343Sensor : I2CSensor {
 
         try {
             Log.d(TAG, "Performing SMUX reset on fd=$fileDescriptor")
-            
+
             // Ensure Bank 0 is selected
             setBankDirect(false)
-            
+
             // Trigger SMUX reset by setting SMUXEN bit in ENABLE register
             // This bit is self-clearing when the operation completes
             enableBitDirect(REG_ENABLE, 4, true) // SMUXEN is bit 4
-            
+
             // Wait for SMUX operation to complete (typically a few milliseconds)
             val startTime = System.currentTimeMillis()
             val timeout = 100 // 100ms timeout
-            
+
             while (System.currentTimeMillis() - startTime < timeout) {
                 val enableReg = readByteRegDirect(REG_ENABLE)
                 val smuxActive = (enableReg shr 4) and 1 == 1
-                
+
                 if (!smuxActive) {
                     Log.d(TAG, "SMUX reset completed successfully on fd=$fileDescriptor")
                     return true
                 }
-                
-                Thread.sleep(1)
+
+                delay(1)
             }
-            
+
             Log.e(TAG, "SMUX reset timed out on fd=$fileDescriptor")
             return false
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during SMUX reset on fd=$fileDescriptor: ${e.message}", e)
             return false
@@ -767,8 +764,7 @@ open class AS7343Sensor : I2CSensor {
      * This is needed if the sensor gets stuck in sleep mode after an interrupt.
      * @return true if clearing was successful, false otherwise
      */
-    @Synchronized
-    fun clearSAIActive(): Boolean {
+    suspend fun clearSAIActive(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Cannot clear SAI active: invalid file descriptor")
             return false
@@ -776,26 +772,26 @@ open class AS7343Sensor : I2CSensor {
 
         try {
             Log.d(TAG, "Clearing SAI active state on fd=$fileDescriptor")
-            
+
             // Ensure Bank 0 is selected
             setBankDirect(false)
-            
+
             // Set CLEAR_SAI_ACT bit in CONTROL register
             enableBitDirect(AS7343_CONTROL_REG, AS7343_CLEAR_SAI_ACT_BIT, true)
-            
+
             // Verify the SAI_ACTIVE bit is cleared in STATUS4 register
-            Thread.sleep(1)
+            delay(1)
             val status4 = readByteRegDirect(AS7343_STATUS4_REG)
             val saiActive = (status4 shr AS7343_SAI_ACTIVE_BIT) and 1 == 1
-            
+
             if (saiActive) {
                 Log.w(TAG, "SAI active state not cleared on fd=$fileDescriptor")
                 return false
             }
-            
+
             Log.d(TAG, "SAI active state cleared successfully on fd=$fileDescriptor")
             return true
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error clearing SAI active on fd=$fileDescriptor: ${e.message}", e)
             return false
@@ -806,7 +802,6 @@ open class AS7343Sensor : I2CSensor {
      * Checks if the sensor is responsive by attempting to read a known register.
      * @return true if sensor responds correctly, false if unresponsive
      */
-    @Synchronized
     fun isSensorResponsive(): Boolean {
         if (fileDescriptor < 0) {
             Log.w(TAG, "isSensorResponsive: invalid file descriptor")
@@ -829,8 +824,7 @@ open class AS7343Sensor : I2CSensor {
      * Tries increasingly aggressive recovery methods until the sensor responds.
      * @return true if recovery was successful, false if all methods failed
      */
-    @Synchronized
-    fun recoverSensor(): Boolean {
+    suspend fun recoverSensor(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Cannot recover sensor: invalid file descriptor")
             return false
@@ -867,10 +861,10 @@ open class AS7343Sensor : I2CSensor {
         try {
             Log.d(TAG, "Attempting full power cycle on fd=$fileDescriptor")
             togglePower(false)
-            Thread.sleep(10) // Wait for power down
+            delay(10) // Wait for power down
             togglePower(true)
-            Thread.sleep(5)  // Wait for power up
-            
+            delay(5)  // Wait for power up
+
             if (isSensorResponsive()) {
                 Log.i(TAG, "Sensor recovered using power cycle on fd=$fileDescriptor")
                 if (initializeSensor()) {
@@ -904,16 +898,16 @@ open class AS7343Sensor : I2CSensor {
     /**
      * Transaction version of enableSpectralMeasurement
      */
-    private fun enableSpectralMeasurementTransaction(enable: Boolean) {
+    private suspend fun enableSpectralMeasurementTransaction(enable: Boolean) {
         setBankTransaction(false) // Ensure Bank 0
-        
+
         if (enable) {
             // Make sure power is on before enabling measurement
             val enableReg = readByteRegTransaction(REG_ENABLE)
             if (enableReg and (1 shl BIT_POWER) == 0) {
                 Log.w(TAG, "Warning: Enabling measurement while power is OFF. Enabling power first.")
                 enableBitTransaction(REG_ENABLE, BIT_POWER, true)
-                Thread.sleep(1) // Small delay after power on
+                delay(1) // Small delay after power on
             }
         }
         enableBitTransaction(REG_ENABLE, BIT_MEASUREMENT, enable)
@@ -922,20 +916,20 @@ open class AS7343Sensor : I2CSensor {
     /**
      * Transaction version of waitForDataReady
      */
-    private fun waitForDataReadyTransaction(timeoutMs: Long): Boolean {
+    private suspend fun waitForDataReadyTransaction(timeoutMs: Long): Boolean {
         val startTime = System.currentTimeMillis()
-        
+
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             val statusReg = readByteRegTransaction(AS7343_STATUS2_REG)
             val avalid = (statusReg shr AS7343_STATUS2_AVALID_BIT) and 1 == 1
-            
+
             if (avalid) {
                 return true
             }
-            
-            Thread.sleep(10) // Wait 10ms before next check
+
+            delay(10) // Wait 10ms before next check
         }
-        
+
         return false // Timeout
     }
 

@@ -30,7 +30,7 @@ abstract class I2CSensor(
         protected const val TAG = "I2CSensor"
         
         // Delay after switching to device address before performing operations (in milliseconds)
-        const val DEVICE_SWITCH_DELAY_MS = 100L
+        const val DEVICE_SWITCH_DELAY_MS = 1L
         
         // Map to track the current device address for each file descriptor
         private val currentDeviceMap = HashMap<Int, Int>()
@@ -164,10 +164,23 @@ abstract class I2CSensor(
      * @return true if initialization was successful, false otherwise
      */
     protected abstract fun initializeSensor(): Boolean
-    
-    public abstract fun readDataImpl(): Map<String, Any>
-    public fun readData(): Map<String, Any> {
-        return notifyListeners(readDataImpl())
+
+    public abstract suspend fun readDataImpl(): Map<String, Any>
+
+    /**
+     * Minimum interval between reads for this sensor (in milliseconds).
+     * Subclasses can override to throttle low-priority sensors.
+     * Default is 0 (no minimum — read as often as the bus loop cycles).
+     */
+    open val minReadIntervalMs: Long = 0L
+
+    /** Timestamp of the last successful read */
+    var lastReadTime: Long = 0L
+
+    public suspend fun readData(): Map<String, Any> {
+        val result = notifyListeners(readDataImpl())
+        lastReadTime = System.currentTimeMillis()
+        return result
     }
     
     protected var lastErrorMessage: String? = null
@@ -413,70 +426,109 @@ abstract class I2CSensor(
      *
      * @return true if the switch was successful, false otherwise
      */
-    protected fun switchToDevice(): Boolean {
+    /**
+     * Core device switching logic. Returns true if a delay is needed after switching.
+     * Must be called while holding the fd lock.
+     */
+    private fun switchToDeviceCore(): Pair<Boolean, Boolean> {
+        if (fileDescriptor < 0) {
+            Log.e(TAG, "Invalid file descriptor: $fileDescriptor")
+            return Pair(false, false)
+        }
+
+        // If using a multiplexer, ensure the correct channel is selected first
+        if (multiplexer != null && multiplexerChannel != null) {
+            if (!multiplexer!!.isReady()) {
+                Log.e(
+                    TAG,
+                    "Multiplexer not ready for sensor at address 0x${sensorAddress.toString(16)}"
+                )
+                return Pair(false, false)
+            }
+
+            // Switch to the multiplexer and select our channel
+            if (!multiplexer!!.isChannelEnabled(multiplexerChannel!!)) {
+                try {
+                    multiplexer!!.selectChannel(multiplexerChannel!!)
+                    Log.d(
+                        TAG,
+                        "Selected multiplexer channel $multiplexerChannel for sensor 0x${
+                            sensorAddress.toString(16)
+                        }"
+                    )
+                } catch (e: Exception) {
+                    Log.e(
+                        TAG,
+                        "Failed to select multiplexer channel $multiplexerChannel: ${e.message}"
+                    )
+                    return Pair(false, false)
+                }
+            }
+        }
+
+        // Check if we're already addressing the correct device
+        val currentDevice = getCurrentDevice(fileDescriptor)
+        if (currentDevice == sensorAddress) {
+            // Already switched to this device, no need to switch again
+            return Pair(true, false)
+        }
+
+        // We need to switch device
+        val result = I2cNative.switchDeviceAddress(fileDescriptor, sensorAddress)
+        if (result < 0) {
+            Log.e(
+                TAG,
+                "Failed to switch to device address 0x${sensorAddress.toString(16)} on fd=$fileDescriptor"
+            )
+            return Pair(false, false)
+        }
+
+        // Update our tracking of the current device
+        setCurrentDevice(fileDescriptor, sensorAddress)
+        return Pair(true, true) // success=true, needsDelay=true
+    }
+
+    /**
+     * Suspend version — delays asynchronously outside the lock.
+     * Use this in suspend/coroutine contexts.
+     */
+    protected suspend fun switchToDevice(): Boolean {
         if (fileDescriptor < 0) {
             Log.e(TAG, "Invalid file descriptor: $fileDescriptor")
             return false
         }
-        
-        // Use the shared lock for file descriptor level synchronization
-        val lock = fdLock ?: this
-        synchronized(lock) {
-            // If using a multiplexer, ensure the correct channel is selected first
-            if (multiplexer != null && multiplexerChannel != null) {
-                if (!multiplexer!!.isReady()) {
-                    Log.e(
-                        TAG,
-                        "Multiplexer not ready for sensor at address 0x${sensorAddress.toString(16)}"
-                    )
-                    return false
-                }
-                
-                // Switch to the multiplexer and select our channel
-                if (!multiplexer!!.isChannelEnabled(multiplexerChannel!!)) {
-                    try {
-                        multiplexer!!.selectChannel(multiplexerChannel!!)
-                        Log.d(
-                            TAG,
-                            "Selected multiplexer channel $multiplexerChannel for sensor 0x${
-                                sensorAddress.toString(16)
-                            }"
-                        )
-                    } catch (e: Exception) {
-                        Log.e(
-                            TAG,
-                            "Failed to select multiplexer channel $multiplexerChannel: ${e.message}"
-                        )
-                        return false
-                    }
-                }
-            }
-            
-            // Check if we're already addressing the correct device
-            val currentDevice = getCurrentDevice(fileDescriptor)
-            if (currentDevice == sensorAddress) {
-                // Already switched to this device, no need to switch again
-                return true
-            }
-            
-            // We need to switch device
-            val result = I2cNative.switchDeviceAddress(fileDescriptor, sensorAddress)
-            if (result < 0) {
-                Log.e(
-                    TAG,
-                    "Failed to switch to device address 0x${sensorAddress.toString(16)} on fd=$fileDescriptor"
-                )
-                return false
-            }
-            
-            // Update our tracking of the current device
-            setCurrentDevice(fileDescriptor, sensorAddress)
-            
-            // Add delay after switching to device to allow I2C bus and device to stabilize
-            Thread.sleep(DEVICE_SWITCH_DELAY_MS)
-            
-            return true
+
+        val (success, needsDelay) = synchronized(fdLock ?: this) {
+            switchToDeviceCore()
         }
+
+        // Delay outside synchronized block to avoid holding lock while sleeping
+        if (needsDelay) {
+            delay(DEVICE_SWITCH_DELAY_MS)
+        }
+
+        return success
+    }
+
+    /**
+     * Blocking version — uses Thread.sleep for the (now tiny 1ms) delay.
+     * Use this inside synchronized blocks where suspend is not allowed.
+     */
+    protected fun switchToDeviceBlocking(): Boolean {
+        if (fileDescriptor < 0) {
+            Log.e(TAG, "Invalid file descriptor: $fileDescriptor")
+            return false
+        }
+
+        val (success, needsDelay) = synchronized(fdLock ?: this) {
+            switchToDeviceCore()
+        }
+
+        if (needsDelay) {
+            Thread.sleep(DEVICE_SWITCH_DELAY_MS)
+        }
+
+        return success
     }
     
     // --- I2C Primitive Helpers ---
@@ -489,12 +541,12 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
             
@@ -513,21 +565,21 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-            
+
             val result = I2cNative.readWord(fileDescriptor, register)
             if (result < 0) {
                 val errorMessage =
                     "I2C Read Error on fd=$fileDescriptor, reg=0x${register.toString(16)}, code=$result"
                 Log.e(TAG, errorMessage)
-                
+
                 // If this sensor supports recovery (spectral sensors) and we're not already in recovery, attempt it
                 if (this is AS7343Sensor && !isRecovering) {
                     Log.w(
@@ -536,14 +588,14 @@ abstract class I2CSensor(
                     )
                     try {
                         isRecovering = true
-                        val recovered = this.recoverSensor()
+                        val recovered = kotlinx.coroutines.runBlocking { this@I2CSensor.let { (it as AS7343Sensor).recoverSensor() } }
                         if (recovered) {
                             Log.i(
                                 TAG,
                                 "Sensor recovery successful, retrying read operation on fd=$fileDescriptor"
                             )
                             // Retry the read operation once after successful recovery
-                            if (!switchToDevice()) {
+                            if (!switchToDeviceBlocking()) {
                                 throw IOException(
                                     "Failed to switch to device after recovery 0x${
                                         sensorAddress.toString(
@@ -577,7 +629,7 @@ abstract class I2CSensor(
                         isRecovering = false
                     }
                 }
-                
+
                 throw IOException(errorMessage)
             }
             return result and 0xFF
@@ -588,12 +640,12 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
             
@@ -614,12 +666,12 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
             
@@ -655,12 +707,12 @@ abstract class I2CSensor(
         if (!isReady()) {
             throw IOException("Not connected to I2C device")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
             
@@ -676,11 +728,11 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("I2C device not connected: invalid file descriptor")
         }
-        
+
         if (!isBusOpen) {
             throw IOException("I2C device not connected: bus not open")
         }
-        
+
         if (!isInitialized) {
             Log.d(
                 TAG,
@@ -689,15 +741,15 @@ abstract class I2CSensor(
                 }, bit=$bit)"
             )
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-            
+
             // Read current value using direct method (already performs device switching)
             val regValue = readByteRegDirect(register)
             val bitMask = (1 shl bit)
@@ -721,11 +773,11 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("I2C device not connected: invalid file descriptor")
         }
-        
+
         if (!isBusOpen) {
             throw IOException("I2C device not connected: bus not open")
         }
-        
+
         if (!isInitialized) {
             Log.d(
                 TAG,
@@ -734,15 +786,15 @@ abstract class I2CSensor(
                 }, bit=$bit)"
             )
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-            
+
             // Read current value (already performs device switching)
             val regValue = readByteReg(register)
             val bitMask = (1 shl bit)
@@ -767,15 +819,15 @@ abstract class I2CSensor(
         if (fileDescriptor < 0) {
             throw IOException("Invalid file descriptor")
         }
-        
+
         // Use the shared lock for file descriptor level synchronization
         val lock = fdLock ?: this
         synchronized(lock) {
             // Switch to this device before performing I/O
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-            
+
             // Read current value
             val regValue = readByteReg(register)
             val mask = ((1 shl width) - 1) shl shift
@@ -814,17 +866,17 @@ abstract class I2CSensor(
      * @param operation The block of I2C operations to execute atomically
      * @return The result of the operation block
      */
-    protected fun <T> executeTransaction(operation: () -> T): T {
+    protected suspend fun <T> executeTransaction(operation: suspend () -> T): T {
         val lock = fdLock ?: this
+        // Ensure we're addressing the correct device at start of transaction
         synchronized(lock) {
-            // Ensure we're addressing the correct device at start of transaction
-            if (!switchToDevice()) {
+            if (!switchToDeviceBlocking()) {
                 throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
             }
-            
-            // Execute the entire operation while holding the lock
-            return operation()
         }
+
+        // Execute the operation — safe because all I2C work runs on a single-thread context
+        return operation()
     }
     
     /**

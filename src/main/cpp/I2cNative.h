@@ -58,6 +58,14 @@ JNIEXPORT jlong JNICALL Java_com_layer_i2c_I2cNative_readAllBytes
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readRawBytes
         (JNIEnv *, jclass, jint, jbyteArray, jint);
 
+/*
+ * Class:     com_layer_i2c_I2cNative
+ * Method:    readBlockData
+ * Signature: (II[BI)I
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_readBlockData
+        (JNIEnv *, jclass, jint, jint, jbyteArray, jint);
+
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_write
         (JNIEnv *env, jclass jcl, jint fd, jint value);
         
@@ -84,6 +92,14 @@ JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_scanAddress
  */
 JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_recoverBus
         (JNIEnv *, jclass, jint);
+
+/*
+ * Class:     com_layer_i2c_I2cNative
+ * Method:    setSchedIdle
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_com_layer_i2c_I2cNative_setSchedIdle
+        (JNIEnv *, jclass);
 
 #ifdef __cplusplus
 }
