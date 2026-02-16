@@ -3,6 +3,8 @@ package com.layer.i2c
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 
 class I2CException(override val message:String, val reg: Int = -1, val value : Int? = null, val fileDescriptor: Int? = null,  val errorCode: Int = -1) : IOException(message) {
@@ -63,6 +65,9 @@ abstract class I2CSensor(
     
     // Lock object for file descriptor-level synchronization
     protected var fdLock: Any? = null
+
+    // Coroutine mutex for transaction-level locking (survives suspension points)
+    private val transactionMutex = Mutex()
     
     // Flag to prevent recursive recovery attempts
     @Volatile
@@ -867,16 +872,15 @@ abstract class I2CSensor(
      * @return The result of the operation block
      */
     protected suspend fun <T> executeTransaction(operation: suspend () -> T): T {
-        val lock = fdLock ?: this
-        // Ensure we're addressing the correct device at start of transaction
-        synchronized(lock) {
-            if (!switchToDeviceBlocking()) {
-                throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+        return transactionMutex.withLock {
+            val lock = fdLock ?: this
+            synchronized(lock) {
+                if (!switchToDeviceBlocking()) {
+                    throw IOException("Failed to switch to device 0x${sensorAddress.toString(16)}")
+                }
             }
+            operation()
         }
-
-        // Execute the operation — safe because all I2C work runs on a single-thread context
-        return operation()
     }
     
     /**

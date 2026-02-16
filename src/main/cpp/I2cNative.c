@@ -80,13 +80,16 @@ static inline __s32 i2c_smbus_read_i2c_block_data(int file, __u8 command,
 {
     union i2c_smbus_data data;
 
-    if (length > 32) {
-        length = 32;
+    // Cap at 31 bytes to always use I2C_SMBUS_I2C_BLOCK_DATA.
+    // I2C_SMBUS_I2C_BLOCK_BROKEN (used for length==32) is unreliable
+    // on some Qualcomm I2C controllers and can corrupt sensor state.
+    if (length > 31) {
+        length = 31;
     }
 
     data.block[0] = length;
     if (i2c_smbus_access(file, I2C_SMBUS_READ, command
-            , length == 32 ? I2C_SMBUS_I2C_BLOCK_BROKEN : I2C_SMBUS_I2C_BLOCK_DATA
+            , I2C_SMBUS_I2C_BLOCK_DATA
             , &data))
     {
         return -1;
