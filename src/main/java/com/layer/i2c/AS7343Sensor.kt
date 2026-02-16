@@ -34,8 +34,8 @@ open class AS7343Sensor : I2CSensor {
     // Default address for AS7343 sensor
     override val sensorAddress: Int = 0x39
 
-    // Spectral reads are moderately expensive — read at most every 5 seconds
-    override val minReadIntervalMs: Long = 5_000L
+    // Spectral reads are moderately expensive — read at most every 2 seconds
+    override val minReadIntervalMs: Long = 2_000L
     
     // Register and bit definitions
     private val REG_ATIME: Int = 0x81        // Integration Time ADC cycles LSB

@@ -48,8 +48,8 @@ open class SHT40Sensor : I2CSensor {
     // SHT40 I2C address (0x44 is the default address)
     override val sensorAddress: Int = 0x44
 
-    // Temperature/humidity is low priority — read at most every 30 seconds
-    override val minReadIntervalMs: Long = 30_000L
+    // Temperature/humidity is low priority — read at most every 10 seconds
+    override val minReadIntervalMs: Long = 10_000L
     
     // Temperature and humidity values
     var temperature: Double = DEFAULT_TEMPERATURE
