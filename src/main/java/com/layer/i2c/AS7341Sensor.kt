@@ -417,7 +417,10 @@ open class AS7341Sensor : I2CSensor {
                 val channelData = mutableMapOf<String, Int>()
 
                 // Phase 1: Read F1-F4 + Clear + NIR
+                // Sequence matches Adafruit reference: disable SP_EN, set SMUX_CMD,
+                // write config, trigger SMUXEN, enable SP_EN, wait for data
                 Log.d(TAG, "SMUX Phase 1: F1-F4 + Clear + NIR on fd=$fileDescriptor")
+                enableSpectralMeasurementTransaction(false)
                 writeSmuxConfigTransaction(SMUX_F1_F4)
                 triggerSmuxLoadTransaction()
                 enableSpectralMeasurementTransaction(true)
@@ -445,6 +448,7 @@ open class AS7341Sensor : I2CSensor {
 
                 // Phase 2: Read F5-F8 + Clear + NIR (discard duplicates)
                 Log.d(TAG, "SMUX Phase 2: F5-F8 on fd=$fileDescriptor")
+                enableSpectralMeasurementTransaction(false)
                 writeSmuxConfigTransaction(SMUX_F5_F8)
                 triggerSmuxLoadTransaction()
                 enableSpectralMeasurementTransaction(true)
@@ -495,20 +499,22 @@ open class AS7341Sensor : I2CSensor {
 
     /**
      * Writes the SMUX configuration bytes to registers 0x00-0x13 within a transaction.
+     * These SMUX RAM registers are always accessible (not affected by REG_BANK).
      */
     private fun writeSmuxConfigTransaction(config: IntArray) {
+        // Set SMUX command to "write" (CMD=2) BEFORE writing config, matching Adafruit sequence
+        writeByteRegTransaction(REG_CFG6, 0x10)  // SMUX_CMD bits [4:3] = 0b10 = 2
         for (i in config.indices) {
             writeByteRegTransaction(i, config[i])
         }
     }
 
+
     /**
-     * Triggers SMUX load: write 0x10 to CFG6, set SMUXEN, wait for SMUXEN to self-clear.
+     * Triggers SMUX load: set SMUXEN, wait for SMUXEN to self-clear.
+     * CFG6 (SMUX_CMD=2) is already set in writeSmuxConfigTransaction.
      */
     private suspend fun triggerSmuxLoadTransaction() {
-        // Write SMUX command: 0x10 means "write SMUX config from RAM to SMUX chain"
-        writeByteRegTransaction(REG_CFG6, 0x10)
-
         // Set SMUXEN bit in ENABLE register to trigger the load
         enableBitTransaction(REG_ENABLE, BIT_SMUXEN, true)
 
@@ -552,7 +558,8 @@ open class AS7341Sensor : I2CSensor {
     }
 
     /**
-     * Reads 6 channels (12 bytes) from data registers 0x95-0xA0 using block read.
+     * Reads 6 channels (12 bytes) from data registers 0x95-0xA0.
+     * Uses block read with fallback to individual register reads.
      */
     private fun readDataRegistersTransaction(): List<Int> {
         val dataBytes = ByteArray(BYTES_PER_SMUX)
