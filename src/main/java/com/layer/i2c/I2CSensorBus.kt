@@ -81,7 +81,7 @@ class I2CSensorBus(val busPath: String) {
             )
             val serialNumber = DeviceUtils.getSerialNumber()
             // only use port 1 on a select list of early device serial numbers:
-            val usesPort1 = listOf("3cc0ef17", "6aceb0a1", "6b52867a", "8b11ea02", "92cd665f", "122ff29e", "715d8296", "b89d02a6", "c10f6a3a", "c1e07642", "e593b0da", "fe5064cd" )
+            val usesPort1 = listOf("3cc0ef17", "51eaaebb", "6aceb0a1", "6b52867a", "8b11ea02", "92cd665f", "122ff29e", "715d8296", "b89d02a6", "c10f6a3a", "c1e07642", "e593b0da", "fe5064cd" )
             if (usesPort1.contains(serialNumber)) {
                 Log.i(TAG, "Connecting i2c port /dev/i2c-1 because serialnumber ${serialNumber} is in the allow list.")
                 ports.add(getInstance(1))
