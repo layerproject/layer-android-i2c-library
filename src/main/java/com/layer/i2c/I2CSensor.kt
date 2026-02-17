@@ -404,8 +404,8 @@ abstract class I2CSensor(
      */
     @Synchronized
     open fun disconnect() {
+        val effectiveBusPath = getEffectiveBusPath()
         if (isBusOpen) {
-            val effectiveBusPath = getEffectiveBusPath()
             Log.d(
                 TAG,
                 "Disconnecting sensor on $effectiveBusPath for address $sensorAddress (fd=$fileDescriptor)..."
@@ -417,8 +417,10 @@ abstract class I2CSensor(
             fdLock = null
             Log.i(TAG, "Sensor on $effectiveBusPath disconnected.")
         } else {
-            val effectiveBusPath = getEffectiveBusPath()
-            Log.d(TAG, "Sensor on $effectiveBusPath already disconnected.")
+            // Even if the bus isn't open, ensure the address is cleaned up
+            // from the bus manager to prevent "already in use" leaks
+            Log.d(TAG, "Sensor on $effectiveBusPath (multiplexer channel ${multiplexerChannel}) already disconnected.")
+            busManager.closeBus(effectiveBusPath, sensorAddress)
         }
         connected = false
     }

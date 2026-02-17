@@ -428,8 +428,10 @@ class I2CSensorBus(val busPath: String) {
             mappedSensors.clear()
             allSensors.clear()
             reconnectList.clear()
-            //make sure the bus is closed:
-            I2CBusManager.getInstance().closeBus(busPath, 112)
+            // Clear ALL tracked state (addresses, refcounts, fd) for this physical bus.
+            // Using closeBus() for individual addresses can leak entries when sensors
+            // are in a half-disconnected state. This ensures a clean slate for rescan.
+            I2CBusManager.getInstance().clearAllForPhysicalBus(busPath)
         }
     }
 }

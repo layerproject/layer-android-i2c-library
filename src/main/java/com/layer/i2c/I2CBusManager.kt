@@ -161,6 +161,35 @@ class I2CBusManager private constructor() {
     fun isAddressInUse(busPath: String, address: Int): Boolean {
         return addressMap[busPath]?.contains(address) == true
     }
+
+    /**
+     * Clears all tracked addresses and reference counts for a physical bus
+     * and all its multiplexer channels, then closes the physical bus fd.
+     * Used during full sensor cleanup to ensure no stale state remains.
+     *
+     * @param physicalBusPath The physical bus path (e.g., "/dev/i2c-0")
+     */
+    @Synchronized
+    fun clearAllForPhysicalBus(physicalBusPath: String) {
+        val fd = busMap[physicalBusPath]
+
+        // Remove all effective bus paths (physical + all channels)
+        val keysToRemove = addressMap.keys.filter {
+            getPhysicalBusPath(it) == physicalBusPath
+        }
+        for (key in keysToRemove) {
+            addressMap.remove(key)
+            referenceCountMap.remove(key)
+        }
+
+        if (fd != null && fd >= 0) {
+            I2cNative.closeBus(fd)
+            I2CSensor.clearDeviceMapping(fd)
+            fdLockMap.remove(fd)
+            busMap.remove(physicalBusPath)
+            Log.d(TAG, "Cleared all state for physical bus $physicalBusPath (fd=$fd)")
+        }
+    }
     
     /**
      * Get the file descriptor for a bus if it's open
