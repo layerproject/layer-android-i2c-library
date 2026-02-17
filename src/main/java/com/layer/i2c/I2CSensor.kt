@@ -586,14 +586,20 @@ abstract class I2CSensor(
                 Log.e(TAG, errorMessage)
 
                 // If this sensor supports recovery (spectral sensors) and we're not already in recovery, attempt it
-                if (this is AS7343Sensor && !isRecovering) {
+                if ((this is AS7343Sensor || this is AS7341Sensor) && !isRecovering) {
                     Log.w(
                         TAG,
                         "Attempting sensor recovery due to I2C read error on fd=$fileDescriptor"
                     )
                     try {
                         isRecovering = true
-                        val recovered = kotlinx.coroutines.runBlocking { this@I2CSensor.let { (it as AS7343Sensor).recoverSensor() } }
+                        val recovered = kotlinx.coroutines.runBlocking {
+                            when (val sensor = this@I2CSensor) {
+                                is AS7343Sensor -> sensor.recoverSensor()
+                                is AS7341Sensor -> sensor.recoverSensor()
+                                else -> false
+                            }
+                        }
                         if (recovered) {
                             Log.i(
                                 TAG,

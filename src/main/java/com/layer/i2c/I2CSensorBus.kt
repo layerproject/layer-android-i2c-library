@@ -86,8 +86,17 @@ class I2CSensorBus(val busPath: String) {
                 Log.i(TAG, "Connecting i2c port /dev/i2c-1 because serialnumber ${serialNumber} is in the allow list.")
                 ports.add(getInstance(1))
             }
-            // these sensors are expected to be present on all layer devices, usually connected to port 0:
-            expect(listOf(SHT40Sensor, AS7343Sensor, AS7343Sensor))
+            // Legacy devices with AS7341 sensors instead of AS7343
+            val as7341DeviceIds = setOf("3cc0ef17", "6aceb0a1", "8b11ea02")
+            val isAS7341Device = as7341DeviceIds.contains(serialNumber)
+
+            if (isAS7341Device) {
+                Log.i(TAG, "Device $serialNumber uses AS7341 sensors — overriding 0x39 device class")
+                CommonI2CDevices.overrideDeviceClass(0x39, AS7341Sensor)
+                expect(listOf(SHT40Sensor, AS7341Sensor, AS7341Sensor))
+            } else {
+                expect(listOf(SHT40Sensor, AS7343Sensor, AS7343Sensor))
+            }
             for (port in ports) {
                 port.start()
             }

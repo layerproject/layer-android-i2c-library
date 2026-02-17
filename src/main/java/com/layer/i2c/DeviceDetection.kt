@@ -184,7 +184,18 @@ data class ScanConfig(
  */
 object CommonI2CDevices {
     private const val TAG = "CommonI2CDevices"
-    
+
+    // Per-address overrides for device class (e.g., AS7341 instead of AS7343 on legacy devices)
+    private val deviceClassOverrides = mutableMapOf<Int, SensorFactory<I2CSensor>>()
+
+    fun overrideDeviceClass(address: Int, factory: SensorFactory<I2CSensor>) {
+        deviceClassOverrides[address] = factory
+    }
+
+    fun clearOverrides() {
+        deviceClassOverrides.clear()
+    }
+
     private val knownDevices = mapOf(
         0x39 to "AS7343 Spectral Sensor",
         0x44 to "SHT40 Temperature/Humidity Sensor",
@@ -218,7 +229,7 @@ object CommonI2CDevices {
     )
     
     fun getDeviceClass(address: Int): SensorFactory<I2CSensor>? {
-        return knownDeviceClasses[address]
+        return deviceClassOverrides[address] ?: knownDeviceClasses[address]
     }
     
     /**
