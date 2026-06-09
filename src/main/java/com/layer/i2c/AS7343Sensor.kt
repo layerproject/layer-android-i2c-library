@@ -278,6 +278,7 @@ open class AS7343Sensor : I2CSensor {
         override val updateTS = this@AS7343Sensor.updateTS
         override val sensorId = this@AS7343Sensor.toString()
         override val channelData :  Map<String, Int> = getLatestChannelData().toMap()
+        override val sensorType = this@AS7343Sensor.sensorTypeName
     }
     
     override fun shouldUpdateState(): Boolean {

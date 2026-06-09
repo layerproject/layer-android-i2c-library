@@ -101,6 +101,11 @@ interface ColorSensorState : SensorState {
      * each indexed by an arbitrary channel label string.
      */
     val channelData: Map<String, Int>
+
+    /**
+     * The spectral chip model that produced this reading, e.g. "AS7343", "TCS3448", "AS7341".
+     */
+    val sensorType: String
 }
 
 /**
