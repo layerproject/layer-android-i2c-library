@@ -75,6 +75,10 @@ abstract class I2CSensor(
     
     // Each sensor type must specify its own I2C address
     protected abstract val sensorAddress: Int
+
+    // Human-readable chip model, derived from the concrete class name (e.g. "AS7343", "TCS3448").
+    // Subclasses that don't follow the "<Model>Sensor" naming convention can override this.
+    open val sensorTypeName: String get() = javaClass.simpleName.removeSuffix("Sensor")
     
     private var listeners: MutableList<OnDataReceivedListener> = mutableListOf()
     

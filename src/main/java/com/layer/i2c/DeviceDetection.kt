@@ -203,6 +203,7 @@ object CommonI2CDevices {
         0x49 to "ADS1115 ADC / AS7341 Spectral Sensor",
         0x4A to "ADS1115 ADC",
         0x4B to "ADS1115 ADC",
+        0x59 to "TCS3448 Spectral Sensor",
         0x68 to "DS3231 RTC / MPU6050 IMU",
         0x69 to "MPU6050 IMU",
         0x70 to "TCA9548 I2C Multiplexer",
@@ -218,6 +219,7 @@ object CommonI2CDevices {
     private val knownDeviceClasses: Map<Int, SensorFactory<I2CSensor>> = mapOf(
         0x39 to AS7343Sensor,
         0x44 to SHT40Sensor,
+        0x59 to TCS3448Sensor,
         0x70 to TCA9548Multiplexer,
         0x71 to TCA9548Multiplexer,
         0x72 to TCA9548Multiplexer,
